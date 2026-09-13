@@ -10,7 +10,6 @@ Security hardening and closed-loop review foundation.
 - Validate HTTP `Host` headers to reduce localhost DNS-rebinding exposure.
 - Reject cross-origin review mutations with strict `Origin`/`Host` validation.
 - Require explicit trusted hosts for non-loopback/reverse-proxy deployments.
-- Harden SVG responses with a restrictive sandbox Content Security Policy.
 - Treat Pillow decompression-bomb warnings as preview failures.
 - Store registry/review data with private filesystem permissions where supported.
 - Add regression tests for traversal, non-image disclosure, and Host validation.

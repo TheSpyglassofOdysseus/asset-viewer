@@ -49,6 +49,12 @@ Testing performed:
 | AV-013 | Informational | Client UI uses `innerHTML`, but values placed into markup are either server-constructed/allowlisted or HTML-escaped. No exploitable DOM XSS was identified in the reviewed paths. | Monitor with regression tests as UI grows. |
 | AV-014 | Informational | Generated JPEG thumbnails do not intentionally copy EXIF/XMP metadata. `Open original` intentionally serves the original file and therefore exposes whatever metadata the source contains to authorized viewers. | Expected behavior; document for shared/remote deployments. |
 
+## Verification snapshot
+
+- `python -m unittest discover -v`: **26 tests passing**
+- `bandit -r asset_viewer`: **0 findings**
+- `pip-audit --skip-editable`: **0 known dependency vulnerabilities**
+
 ## Confirmed positive controls
 
 - Loopback bind is the default.
@@ -62,7 +68,7 @@ Testing performed:
 - Full-size originals are streamed instead of loaded wholly into process memory.
 - Local registry/review state is stored with private directory/file permissions where the OS supports POSIX modes.
 - `pip-audit` reported no known vulnerabilities in the audited installed dependency set (Pillow 12.3.0).
-- Bandit reported no medium/high findings; one low exception-handling finding was reviewed.
+- Bandit now reports no findings after the exception-handling path was tightened.
 - GitHub secret scanning and push protection are enabled.
 
 ## Security priorities
@@ -74,7 +80,7 @@ Testing performed:
 3. Isolate image decoding from request handling with bounded workers, time/memory limits, and atomic thumbnail generation.
 4. Replace the new bounded recursive scan with indexed/incremental collection scanning for large libraries.
 5. Mature the new Basic-auth/CSRF remote mode with trusted-proxy identity or stronger session authentication where multi-user deployments require it.
-6. Add end-to-end security regression tests covering raw-file access, Host validation, SVG policy, traversal, malformed images, and request-size limits.
+6. Continue expanding end-to-end security regression tests beyond the now-covered raw-file access, Host/Origin/CSRF validation, SVG policy, traversal/symlink escape, auth, concurrent writes, and permissions into malformed-image fuzzing and request-budget tests.
 
 ### P1 — supply-chain and release hardening
 

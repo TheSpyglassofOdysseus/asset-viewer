@@ -19,27 +19,27 @@ Asset Viewer is the **review plane**, not the storage plane. Projects and creati
 Target: make private/server deployments robust enough to recommend confidently.
 
 - Replace or wrap the development `http.server` listener with a production serving layer.
-- Move collection/review state to SQLite with transactions, migrations, and stable asset IDs.
+- [~] Review/comment/seen state is now transactional SQLite with migration; stable asset IDs and indexed catalog records remain open.
 - Build an indexed catalog so page loads do not recursively scan every source directory.
-- Add bounded background thumbnail workers and resource limits for image decoding.
-- Rasterize SVG previews by default; opening the active original remains an explicit action.
-- Add explicit remote-access authentication/proxy identity support and CSRF/origin protections for state changes.
-- Expand end-to-end security tests: traversal, encoded paths, symlinks, hostile Host/Origin, malformed images, SVG, request limits, races.
-- Add `asset-viewer doctor` to report unsafe binds, permissions, stale collections, decoder support, and deployment warnings.
-- Protect the release/supply chain: branch rules, dependency review, SBOM, release provenance/signing where practical.
+- [~] Image byte/pixel/scan limits are implemented; background worker isolation remains open.
+- [x] SVG previews are inert JPEG placeholders and originals are forced downloads.
+- [~] CSRF/origin protections, trusted hosts, and optional Basic auth are implemented; stronger proxy identity/session auth remains open.
+- [~] Regression coverage now includes traversal, symlinks, Host/Origin, CSRF, SVG, non-image disclosure, concurrent writes, and permissions; fuzz/malformed-image/request-budget coverage remains open.
+- [x] `asset-viewer doctor` reports bind, permissions, collection readability, and auth posture; richer decoder/staleness diagnostics can grow later.
+- [~] Branch rules, pinned Actions, Dependabot, CodeQL, Bandit/pip-audit, and PR dependency review are in place; SBOM/provenance/signing remain open.
 
 ## P1 — close the human/agent review loop
 
 Target: make review decisions directly useful to the next agent turn.
 
-- Per-asset comments/notes.
-- JSON review manifest and `asset-viewer reviews --json`.
-- Stable collection URLs and `asset-viewer collection url`.
-- Batch selection and bulk Approve / Maybe / Reject.
-- Side-by-side compare mode for 2–4 assets with synchronized zoom/pan.
-- New/unread-since-last-review state.
-- Review history and undo.
-- `asset-viewer pending --json` and exportable approved/rejected manifests.
+- [x] Per-asset comments/notes.
+- [x] JSON review manifest and `asset-viewer reviews --json`.
+- [x] Stable collection URLs in the browser (`/c/<slug>`); CLI URL helper remains open.
+- [x] Batch selection and bulk Approve / Maybe / Reject.
+- [x] Side-by-side compare mode for 2–4 assets. Synchronized zoom/pan remains open.
+- [x] New/unseen-since-discovery state.
+- [ ] Review history and undo.
+- [x] Exportable filtered manifests; `asset-viewer pending --json` remains open.
 
 Example machine-readable feedback:
 

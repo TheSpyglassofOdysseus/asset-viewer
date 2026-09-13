@@ -13,6 +13,9 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e .
 python -m unittest discover -v
+python -m compileall -q asset_viewer tests
+bandit -r asset_viewer
+pip-audit --skip-editable
 ```
 
 For UI work, use isolated local state:
