@@ -21,9 +21,14 @@ from PIL import Image, ImageDraw, ImageOps
 from . import __version__
 from .storage import (
     IMAGE_EXTS,
+    collection_review_state,
     collections,
+    complete_collection_review,
     ensure_assets,
     mark_seen,
+    pending_summary,
+    reopen_collection_review,
+    review_history,
     review_manifest,
     review_records,
     root_for,
@@ -32,6 +37,7 @@ from .storage import (
     set_review,
     set_reviews_batch,
     thumb_path,
+    undo_last_review,
 )
 
 STATIC = Path(__file__).resolve().parent / "static"
@@ -337,7 +343,8 @@ class AssetViewerHandler(BaseHTTPRequestHandler):
                 return self._send_json(404, {"error": "collection not found"})
             public_rows = [{"slug": row["slug"], "label": row["label"]} for row in rows]
             images, scan = scan_collection(active) if active else ([], {"truncated": False, "reason": None, "elapsed_ms": 0})
-            return self._send_json(200, {"collections": public_rows, "active": active, "images": images, "scan": scan})
+            review_state = collection_review_state(active) if active else None
+            return self._send_json(200, {"collections": public_rows, "active": active, "images": images, "scan": scan, "review_state": review_state})
         if path == "/api/reviews":
             query = urllib.parse.parse_qs(parsed.query)
             collection = (query.get("collection") or [None])[0]
@@ -346,6 +353,20 @@ class AssetViewerHandler(BaseHTTPRequestHandler):
                 return self._send_json(200, review_manifest(collection, status))
             except ValueError as exc:
                 return self._send_json(400, {"error": str(exc)})
+        if path == "/api/pending":
+            query = urllib.parse.parse_qs(parsed.query)
+            collection = (query.get("collection") or [None])[0]
+            try:
+                return self._send_json(200, pending_summary(collection))
+            except ValueError as exc:
+                return self._send_json(400, {"error": str(exc)})
+        if path == "/api/review-history":
+            query = urllib.parse.parse_qs(parsed.query)
+            collection = (query.get("collection") or [""])[0]
+            rel = (query.get("rel") or [""])[0]
+            if not root_for(collection) or not rel:
+                return self._send_json(400, {"error": "collection and rel are required"})
+            return self._send_json(200, {"collection": collection, "rel": rel, "events": review_history(collection, rel)})
         if path.startswith("/asset/file/") or path.startswith("/asset/thumb/"):
             parts = path.split("/", 4)
             if len(parts) != 5:
@@ -409,6 +430,20 @@ class AssetViewerHandler(BaseHTTPRequestHandler):
                     raise ValueError("invalid seen request")
                 changed = mark_seen(slug, rels)
                 return self._send_json(200, {"ok": True, "changed": changed})
+            if path == "/api/complete":
+                state = complete_collection_review(slug)
+                return self._send_json(200, {"ok": True, "review_state": state})
+            if path == "/api/reopen":
+                state = reopen_collection_review(slug)
+                return self._send_json(200, {"ok": True, "review_state": state})
+            if path == "/api/undo":
+                rel = str(payload.get("rel", ""))
+                if not safe_file(slug, rel):
+                    raise ValueError("asset not found")
+                result = undo_last_review(slug, rel)
+                if not result:
+                    raise ValueError("no review change to undo")
+                return self._send_json(200, {"ok": True, "result": result})
             return self._send_json(404, {"error": "not found"})
         except (ValueError, TypeError, json.JSONDecodeError) as exc:
             LOGGER.warning("bad request path=%s client=%s error=%s", path, self.client_address[0], exc)

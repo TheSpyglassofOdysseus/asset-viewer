@@ -114,6 +114,49 @@ class StorageTests(unittest.TestCase):
         self.assertTrue(storage.database_path().exists())
         self.assertTrue(legacy.with_name("reviews.json.migrated").exists())
 
+    def test_review_history_and_undo(self):
+        storage.add_collection(str(self.images), "Images")
+        storage.set_review("images", "frame.png", "maybe", comment="first")
+        storage.set_review("images", "frame.png", "approved", comment="ship it")
+        history = storage.review_history("images", "frame.png")
+        self.assertEqual(len(history), 2)
+        self.assertEqual(history[0]["new_status"], "approved")
+        undone = storage.undo_last_review("images", "frame.png")
+        self.assertEqual(undone["status"], "maybe")
+        manifest = storage.review_manifest("images")
+        self.assertEqual(manifest["items"][0]["status"], "maybe")
+        self.assertEqual(manifest["items"][0]["comment"], "first")
+        self.assertIsNotNone(storage.review_history("images", "frame.png")[0]["undone_at"])
+
+    def test_collection_completion_and_pending_summary(self):
+        storage.add_collection(str(self.images), "Images")
+        storage.ensure_assets("images", ["a.png", "b.png"])
+        state = storage.collection_review_state("images")
+        self.assertTrue(state["pending"])
+        with self.assertRaises(ValueError):
+            storage.complete_collection_review("images")
+        storage.set_reviews_batch("images", ["a.png", "b.png"], "approved")
+        completed = storage.complete_collection_review("images")
+        self.assertTrue(completed["complete"])
+        self.assertFalse(storage.pending_summary("images")["pending"])
+        reopened = storage.reopen_collection_review("images")
+        self.assertTrue(reopened["pending"])
+        self.assertFalse(reopened["complete"])
+
+    def test_completed_collection_becomes_stale_when_new_asset_is_discovered(self):
+        storage.add_collection(str(self.images), "Images")
+        storage.ensure_assets("images", ["a.png"])
+        storage.set_review("images", "a.png", "approved")
+        storage.complete_collection_review("images")
+        # ISO timestamps use second precision; force an older completion time so
+        # the new discovery deterministically lands after it.
+        with storage._connection() as conn:
+            conn.execute("UPDATE collection_state SET completed_at='2000-01-01T00:00:00+00:00' WHERE collection='images'")
+        storage.ensure_assets("images", ["b.png"])
+        state = storage.collection_review_state("images")
+        self.assertTrue(state["stale"])
+        self.assertTrue(state["pending"])
+
     def test_state_files_are_private(self):
         storage.add_collection(str(self.images), "Images")
         storage.set_review("images", "frame.png", "approved")

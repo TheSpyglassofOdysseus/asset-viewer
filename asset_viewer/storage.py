@@ -18,7 +18,7 @@ _DB_INIT_LOCK = threading.RLock()
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds")
 
 
 def data_dir() -> Path:
@@ -110,6 +110,25 @@ def _connect() -> sqlite3.Connection:
                 ON assets(collection, status);
             CREATE INDEX IF NOT EXISTS idx_assets_collection_seen
                 ON assets(collection, seen_at);
+            CREATE TABLE IF NOT EXISTS review_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                collection TEXT NOT NULL,
+                rel TEXT NOT NULL,
+                action TEXT NOT NULL,
+                old_status TEXT NOT NULL DEFAULT '',
+                new_status TEXT NOT NULL DEFAULT '',
+                old_comment TEXT NOT NULL DEFAULT '',
+                new_comment TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                undone_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_review_events_asset
+                ON review_events(collection, rel, id DESC);
+            CREATE TABLE IF NOT EXISTS collection_state (
+                collection TEXT PRIMARY KEY,
+                completed_at TEXT,
+                updated_at TEXT NOT NULL
+            );
             """
         )
         _migrate_legacy_reviews(conn)
@@ -290,30 +309,93 @@ def reviews() -> dict[str, dict[str, str]]:
     }
 
 
+def _record_review_event(
+    conn: sqlite3.Connection,
+    collection: str,
+    relative: str,
+    action: str,
+    old_status: str,
+    new_status: str,
+    old_comment: str,
+    new_comment: str,
+    now: str,
+) -> None:
+    if old_status == new_status and old_comment == new_comment:
+        return
+    conn.execute(
+        """
+        INSERT INTO review_events(
+            collection, rel, action, old_status, new_status, old_comment, new_comment, created_at
+        ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (collection, relative, action, old_status, new_status, old_comment, new_comment, now),
+    )
+
+
+def review_history(collection: str, relative: str, limit: int = 50) -> list[dict[str, Any]]:
+    limit = max(1, min(int(limit), 500))
+    with _connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, action, old_status, new_status, old_comment, new_comment, created_at, undone_at
+            FROM review_events
+            WHERE collection=? AND rel=?
+            ORDER BY id DESC LIMIT ?
+            """,
+            (collection, relative, limit),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def undo_last_review(collection: str, relative: str) -> dict[str, Any] | None:
+    now = utc_now()
+    with _connection() as conn:
+        event = conn.execute(
+            """
+            SELECT id, old_status, old_comment, new_status, new_comment
+            FROM review_events
+            WHERE collection=? AND rel=? AND undone_at IS NULL
+            ORDER BY id DESC LIMIT 1
+            """,
+            (collection, relative),
+        ).fetchone()
+        if not event:
+            return None
+        conn.execute(
+            "UPDATE assets SET status=?, comment=?, updated_at=? WHERE collection=? AND rel=?",
+            (event["old_status"], event["old_comment"], now, collection, relative),
+        )
+        conn.execute("UPDATE review_events SET undone_at=? WHERE id=?", (now, event["id"]))
+        return {
+            "event_id": event["id"],
+            "status": event["old_status"],
+            "comment": event["old_comment"],
+            "undone_at": now,
+        }
+
+
 def set_review(collection: str, relative: str, status: str, comment: str | None = None, mark_seen: bool = True) -> None:
     if status not in VALID_STATUSES:
         raise ValueError(f"invalid review status: {status}")
     ensure_assets(collection, [relative])
     now = utc_now()
     with _connection() as conn:
-        if comment is None:
-            conn.execute(
-                """
-                UPDATE assets
-                SET status=?, seen_at=CASE WHEN ? THEN COALESCE(seen_at, ?) ELSE seen_at END, updated_at=?
-                WHERE collection=? AND rel=?
-                """,
-                (status, int(mark_seen), now, now, collection, relative),
-            )
-        else:
-            conn.execute(
-                """
-                UPDATE assets
-                SET status=?, comment=?, seen_at=CASE WHEN ? THEN COALESCE(seen_at, ?) ELSE seen_at END, updated_at=?
-                WHERE collection=? AND rel=?
-                """,
-                (status, str(comment)[:10000], int(mark_seen), now, now, collection, relative),
-            )
+        current = conn.execute(
+            "SELECT status, comment FROM assets WHERE collection=? AND rel=?", (collection, relative)
+        ).fetchone()
+        if not current:
+            raise ValueError("asset review state not found")
+        old_status, old_comment = current["status"], current["comment"]
+        new_comment = old_comment if comment is None else str(comment)[:10000]
+        conn.execute(
+            """
+            UPDATE assets
+            SET status=?, comment=?, seen_at=CASE WHEN ? THEN COALESCE(seen_at, ?) ELSE seen_at END, updated_at=?
+            WHERE collection=? AND rel=?
+            """,
+            (status, new_comment, int(mark_seen), now, now, collection, relative),
+        )
+        _record_review_event(conn, collection, relative, "review", old_status, status, old_comment, new_comment, now)
 
 
 def set_reviews_batch(collection: str, relatives: Iterable[str], status: str) -> int:
@@ -324,24 +406,41 @@ def set_reviews_batch(collection: str, relatives: Iterable[str], status: str) ->
         return 0
     ensure_assets(collection, unique)
     now = utc_now()
+    changed = 0
     with _connection() as conn:
-        conn.executemany(
-            """
-            UPDATE assets SET status=?, seen_at=COALESCE(seen_at, ?), updated_at=?
-            WHERE collection=? AND rel=?
-            """,
-            [(status, now, now, collection, rel) for rel in unique],
-        )
-    return len(unique)
+        for rel in unique:
+            current = conn.execute(
+                "SELECT status, comment FROM assets WHERE collection=? AND rel=?", (collection, rel)
+            ).fetchone()
+            if not current:
+                continue
+            conn.execute(
+                "UPDATE assets SET status=?, seen_at=COALESCE(seen_at, ?), updated_at=? WHERE collection=? AND rel=?",
+                (status, now, now, collection, rel),
+            )
+            _record_review_event(
+                conn, collection, rel, "batch", current["status"], status, current["comment"], current["comment"], now
+            )
+            changed += 1
+    return changed
 
 
 def set_comment(collection: str, relative: str, comment: str) -> None:
     ensure_assets(collection, [relative])
     now = utc_now()
+    new_comment = str(comment)[:10000]
     with _connection() as conn:
+        current = conn.execute(
+            "SELECT status, comment FROM assets WHERE collection=? AND rel=?", (collection, relative)
+        ).fetchone()
+        if not current:
+            raise ValueError("asset review state not found")
         conn.execute(
             "UPDATE assets SET comment=?, seen_at=COALESCE(seen_at, ?), updated_at=? WHERE collection=? AND rel=?",
-            (str(comment)[:10000], now, now, collection, relative),
+            (new_comment, now, now, collection, relative),
+        )
+        _record_review_event(
+            conn, collection, relative, "comment", current["status"], current["status"], current["comment"], new_comment, now
         )
 
 
@@ -357,6 +456,85 @@ def mark_seen(collection: str, relatives: Iterable[str]) -> int:
             [(now, now, collection, rel) for rel in unique],
         )
     return len(unique)
+
+
+def collection_review_state(collection: str) -> dict[str, Any]:
+    with _connection() as conn:
+        state = conn.execute(
+            "SELECT completed_at, updated_at FROM collection_state WHERE collection=?", (collection,)
+        ).fetchone()
+        counts = conn.execute(
+            """
+            SELECT COUNT(*) AS total,
+                   SUM(CASE WHEN status='' THEN 1 ELSE 0 END) AS unreviewed,
+                   SUM(CASE WHEN seen_at IS NULL THEN 1 ELSE 0 END) AS new_count,
+                   MAX(first_seen_at) AS newest_asset
+            FROM assets WHERE collection=?
+            """,
+            (collection,),
+        ).fetchone()
+    completed_at = state["completed_at"] if state else None
+    total = int(counts["total"] or 0)
+    unreviewed = int(counts["unreviewed"] or 0)
+    new_count = int(counts["new_count"] or 0)
+    newest_asset = counts["newest_asset"]
+    stale = bool(completed_at and newest_asset and newest_asset > completed_at)
+    complete = bool(completed_at and unreviewed == 0 and not stale)
+    return {
+        "collection": collection,
+        "completed_at": completed_at,
+        "updated_at": state["updated_at"] if state else None,
+        "total": total,
+        "unreviewed": unreviewed,
+        "new": new_count,
+        "stale": stale,
+        "complete": complete,
+        "pending": not complete,
+    }
+
+
+def complete_collection_review(collection: str) -> dict[str, Any]:
+    state = collection_review_state(collection)
+    if state["unreviewed"]:
+        raise ValueError(f"collection has {state['unreviewed']} unreviewed asset(s)")
+    now = utc_now()
+    with _connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO collection_state(collection, completed_at, updated_at) VALUES(?, ?, ?)
+            ON CONFLICT(collection) DO UPDATE SET completed_at=excluded.completed_at, updated_at=excluded.updated_at
+            """,
+            (collection, now, now),
+        )
+    return collection_review_state(collection)
+
+
+def reopen_collection_review(collection: str) -> dict[str, Any]:
+    now = utc_now()
+    with _connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO collection_state(collection, completed_at, updated_at) VALUES(?, NULL, ?)
+            ON CONFLICT(collection) DO UPDATE SET completed_at=NULL, updated_at=excluded.updated_at
+            """,
+            (collection, now),
+        )
+    return collection_review_state(collection)
+
+
+def pending_summary(collection: str | None = None) -> dict[str, Any]:
+    rows = collections()
+    if collection:
+        rows = [row for row in rows if row["slug"] == collection]
+        if not rows:
+            raise ValueError(f"collection not found: {collection}")
+    states = [collection_review_state(row["slug"]) | {"label": row["label"]} for row in rows]
+    return {
+        "version": 1,
+        "generated_at": utc_now(),
+        "pending": any(state["pending"] for state in states),
+        "collections": states,
+    }
 
 
 def review_manifest(collection: str | None = None, status: str | None = None) -> dict[str, Any]:

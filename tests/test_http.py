@@ -147,6 +147,50 @@ class HttpSecurityTests(unittest.TestCase):
         self.assertNotIn(b"<script>", body)
         self.assertTrue(body.startswith(b"\xff\xd8"))
 
+    def test_gallery_includes_collection_review_state(self):
+        status, _, body = self.request("GET", "/api/gallery?collection=samples")
+        self.assertEqual(status, 200)
+        payload = json.loads(body)
+        self.assertTrue(payload["review_state"]["pending"])
+        self.assertEqual(payload["review_state"]["unreviewed"], 2)
+
+    def test_complete_reopen_and_pending_endpoints(self):
+        self.request("GET", "/api/gallery?collection=samples")
+        payload = json.dumps({"collection": "samples"})
+        status, _, body = self.request("POST", "/api/complete", origin=self.same_origin(), body=payload, csrf="test-csrf-token")
+        self.assertEqual(status, 400)
+        self.assertIn("unreviewed", json.loads(body)["error"])
+        batch = json.dumps({"collection": "samples", "rels": ["sample.png", "second.png"], "status": "approved"})
+        status, _, _ = self.request("POST", "/api/review", origin=self.same_origin(), body=batch, csrf="test-csrf-token")
+        self.assertEqual(status, 200)
+        status, _, body = self.request("POST", "/api/complete", origin=self.same_origin(), body=payload, csrf="test-csrf-token")
+        self.assertEqual(status, 200)
+        self.assertTrue(json.loads(body)["review_state"]["complete"])
+        status, _, body = self.request("GET", "/api/pending?collection=samples")
+        self.assertEqual(status, 200)
+        self.assertFalse(json.loads(body)["pending"])
+        status, _, body = self.request("POST", "/api/reopen", origin=self.same_origin(), body=payload, csrf="test-csrf-token")
+        self.assertEqual(status, 200)
+        self.assertTrue(json.loads(body)["review_state"]["pending"])
+
+    def test_review_history_and_undo_endpoints(self):
+        self.request("GET", "/api/gallery?collection=samples")
+        first = json.dumps({"collection": "samples", "rel": "sample.png", "status": "maybe", "comment": "first"})
+        second = json.dumps({"collection": "samples", "rel": "sample.png", "status": "approved", "comment": "ship"})
+        self.assertEqual(self.request("POST", "/api/review", origin=self.same_origin(), body=first, csrf="test-csrf-token")[0], 200)
+        self.assertEqual(self.request("POST", "/api/review", origin=self.same_origin(), body=second, csrf="test-csrf-token")[0], 200)
+        status, _, body = self.request("GET", "/api/review-history?collection=samples&rel=sample.png")
+        self.assertEqual(status, 200)
+        history = json.loads(body)["events"]
+        self.assertEqual(len(history), 2)
+        self.assertEqual(history[0]["new_status"], "approved")
+        undo = json.dumps({"collection": "samples", "rel": "sample.png"})
+        status, _, body = self.request("POST", "/api/undo", origin=self.same_origin(), body=undo, csrf="test-csrf-token")
+        self.assertEqual(status, 200)
+        result = json.loads(body)["result"]
+        self.assertEqual(result["status"], "maybe")
+        self.assertEqual(result["comment"], "first")
+
     def test_security_headers_present(self):
         status, headers, _ = self.request("GET", "/")
         self.assertEqual(status, 200)

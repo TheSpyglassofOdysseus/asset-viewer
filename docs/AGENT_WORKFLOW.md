@@ -57,3 +57,26 @@ asset-viewer export-manifest --collection brand-concepts --output review-manifes
 ```
 
 The manifest includes status, comments, new/seen timestamps, and update timestamps. This is preferred over asking an agent to infer approval state from chat text.
+
+## Waiting for explicit human completion
+
+A non-empty folder is not the same thing as a finished human review. Asset Viewer exposes explicit collection completion so orchestrators can distinguish those states:
+
+```bash
+asset-viewer pending --collection brand-concepts --json
+```
+
+Exit code `2` means human review is still pending. Exit code `0` means the collection was explicitly marked complete after every asset received a review status.
+
+Once decisions are available:
+
+```bash
+asset-viewer reviews --collection brand-concepts --json
+```
+
+If a human changes their mind, Asset Viewer records review events and supports undo/history without touching the source image:
+
+```bash
+asset-viewer history brand-concepts concept-17.png --json
+asset-viewer undo brand-concepts concept-17.png
+```

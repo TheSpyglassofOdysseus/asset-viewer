@@ -32,6 +32,9 @@ No import job. No duplicate asset library. No requirement to upload the batch to
 - **Batch review and compare mode** for fast variant triage.
 - **Stable collection URLs** at `/c/<slug>` for direct handoff.
 - **Machine-readable manifests** through the CLI and read-only JSON API.
+- **Explicit review completion** with automation-friendly pending state.
+- **Review history and undo** for status/comment decisions.
+- **Filename/path search and sorting** for growing collections.
 - **Keyboard review**: arrow keys to navigate; `A`, `M`, `R` to classify.
 - **Multiple collections** behind one viewer URL.
 - **Recursive discovery** of PNG, JPEG, WebP, GIF, AVIF, BMP, and SVG assets.
@@ -84,6 +87,12 @@ asset-viewer list                  List registered folders
 asset-viewer scan [--collection]   Discover/refresh asset metadata
 asset-viewer reviews [--collection]  Read review state (add --json for agents)
 asset-viewer export-manifest       Export review state as JSON
+asset-viewer pending                Exit 2 while human review is still pending
+asset-viewer complete SLUG          Mark a fully-reviewed collection complete
+asset-viewer reopen SLUG            Reopen collection review
+asset-viewer history SLUG REL       Show review history for one asset
+asset-viewer undo SLUG REL          Undo the latest review/comment change
+asset-viewer collection-url SLUG    Print the stable browser handoff URL
 asset-viewer doctor                Check state and deployment prerequisites
 asset-viewer serve                 Start the web viewer
 asset-viewer demo                  Create/register synthetic demo assets
@@ -115,6 +124,17 @@ When this repository creates images for human review:
 ```
 
 That turns the handoff into a predictable sentence: **“I added the new images to Asset Viewer.”**
+
+Automation can now close the loop explicitly:
+
+```bash
+asset-viewer pending --collection project-images --json
+# exit code 2 = human review still required
+# exit code 0 = review explicitly completed
+
+asset-viewer reviews --collection project-images --json
+asset-viewer collection-url project-images --base-url https://viewer.example.com
+```
 
 See [docs/AGENT_WORKFLOW.md](docs/AGENT_WORKFLOW.md) for a fuller pattern.
 
