@@ -11,6 +11,8 @@ Before committing backend or CLI changes:
 ```bash
 python -m unittest discover -v
 python -m compileall -q asset_viewer tests
+bandit -r asset_viewer
+pip-audit --skip-editable
 ```
 
 For UI changes, use synthetic demo assets rather than private project imagery:

@@ -27,10 +27,15 @@ No import job. No duplicate asset library. No requirement to upload the batch to
 - **Fast thumbnail grid** with lazy loading and disk-cached previews.
 - **Full-screen carousel** for image-by-image review.
 - **Approve / Maybe / Reject** states stored separately from source files.
+- **Review notes/comments** attached to the exact asset without modifying it.
+- **New/unseen tracking** so recurring collections show what changed.
+- **Batch review and compare mode** for fast variant triage.
+- **Stable collection URLs** at `/c/<slug>` for direct handoff.
+- **Machine-readable manifests** through the CLI and read-only JSON API.
 - **Keyboard review**: arrow keys to navigate; `A`, `M`, `R` to classify.
 - **Multiple collections** behind one viewer URL.
 - **Recursive discovery** of PNG, JPEG, WebP, GIF, AVIF, BMP, and SVG assets.
-- **Local-first security posture** — binds to `127.0.0.1` by default.
+- **Local-first security posture** — localhost by default, CSRF/Host enforcement, safe SVG handling, bounded previews/scans, and optional Basic auth.
 - **Agent-friendly CLI** that is easy to call from scripts and repo instructions.
 - **Minimal stack** — Python, Pillow, SQLite from the standard library, and a small browser UI. No external database service required.
 
@@ -77,7 +82,7 @@ asset-viewer add PATH [LABEL]      Register an image folder
 asset-viewer remove SLUG|PATH      Remove a collection
 asset-viewer list                  List registered folders
 asset-viewer scan [--collection]   Discover/refresh asset metadata
-asset-viewer reviews --collection  Read review state (add --json for agents)
+asset-viewer reviews [--collection]  Read review state (add --json for agents)
 asset-viewer export-manifest       Export review state as JSON
 asset-viewer doctor                Check state and deployment prerequisites
 asset-viewer serve                 Start the web viewer
