@@ -37,6 +37,7 @@ Relevant attackers/failure modes include malicious browser origins, hostile file
 | R2-011 | Low/Medium | Event feeds could become unnecessarily large for long-running installations. | **Fixed.** Event page sizes are bounded (default 100, maximum 500). |
 | R2-012 | Residual | Filesystem validation and later open/stat are separate operations; a privileged writer could theoretically race a path between checks. | **Open/P0.** Private/trusted source directories reduce practical exposure. A hardened file-opening layer (`openat`/no-follow semantics or worker sandbox) is preferred before hostile multi-tenant input is in scope. |
 | R2-013 | Residual | Python's built-in `http.server` is not a production application server. | **Open/P0.** Continue binding to loopback behind a trusted reverse proxy/private access layer until replaced/wrapped. |
+| R2-014 | High integrity | Filesystem size/mtime metadata can theoretically be preserved while reviewed bytes are replaced, allowing a stale decision if metadata alone is trusted. | **Fixed in v0.4.** Non-empty decisions bind to a SHA-256 fingerprint; scans and completion verify the fingerprint and invalidate the decision on mismatch. |
 
 ## Positive controls verified
 
@@ -73,8 +74,8 @@ CI, CodeQL, dependency review, and the repository security workflow must also pa
 1. Replace/wrap `http.server` with a production serving layer while preserving localhost-safe defaults.
 2. Isolate image decoding in bounded worker processes with OS-level CPU/memory/time limits and atomic cache writes.
 3. Harden the validated-file handoff against TOCTOU races for deployments where registered directories are not trusted.
-4. Add malformed-image/fuzz regression cases and request-budget/load tests.
-5. Add release SBOM/provenance/signing where practical.
+4. Continue malformed-image/path fuzz regression cases and request-budget/load tests.
+5. Add release provenance/signing; CycloneDX SBOM generation is now automated.
 
 ## Recommendation
 
