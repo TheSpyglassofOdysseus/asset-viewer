@@ -9,6 +9,12 @@ let state = {
   reviewState: null,
   compareAssets: [],
   compareMode: 'side',
+  annotations: [],
+  annotationMode: null,
+  annotationStart: null,
+  compareLinked: true,
+  compareTransforms: [],
+  compareDrag: null,
 };
 
 const $ = selector => document.querySelector(selector);
@@ -130,7 +136,7 @@ function applyFilter() {
       <div class="caption">
         <div class="name">${esc(asset.name)}</div>
         <div class="path">${esc(asset.rel)}</div>
-        <div class="meta-row">${asset.is_new ? '<span class="new-dot">new</span>' : ''}${asset.comment ? '<span class="note-dot">note</span>' : ''}</div>
+        <div class="meta-row">${asset.is_new ? '<span class="new-dot">new</span>' : ''}${asset.comment ? '<span class="note-dot">note</span>' : ''}${asset.annotation_count ? `<span class="note-dot">${asset.annotation_count} pinned</span>` : ''}</div>
       </div>
     </article>`;
   }).join('');
@@ -225,6 +231,8 @@ function openAt(index, updateUrl = true) {
   notice.classList.toggle('hidden', !asset.preview_error);
   modal.classList.remove('hidden');
   document.body.style.overflow = 'hidden';
+  cancelAnnotationMode();
+  loadAnnotations(asset).catch(showError);
   if (updateUrl && asset.asset_id) history.replaceState(null, '', assetUrl(asset));
   if (asset.is_new) {
     asset.is_new = false;
@@ -235,6 +243,9 @@ function openAt(index, updateUrl = true) {
 function close() {
   modal.classList.add('hidden');
   $('#full').src = '';
+  state.annotations = [];
+  cancelAnnotationMode();
+  renderAnnotations();
   if (state.active) history.replaceState(null, '', collectionUrl(state.active));
   if (compareModal.classList.contains('hidden')) document.body.style.overflow = '';
 }
@@ -339,6 +350,209 @@ async function copyReviewLink() {
   setTimeout(() => { button.textContent = original; }, 900);
 }
 
+async function loadAnnotations(asset) {
+  if (!asset || !asset.asset_id) {
+    state.annotations = [];
+    renderAnnotations();
+    return;
+  }
+  const params = new URLSearchParams({collection: asset.collection, asset_id: asset.asset_id});
+  const response = await fetch('/api/annotations?' + params, {cache: 'no-store'});
+  if (!response.ok) throw new Error('Annotation request failed');
+  const data = await response.json();
+  state.annotations = data.annotations || [];
+  renderAnnotations();
+}
+
+function renderAnnotations() {
+  const layer = $('#annotationLayer');
+  const panel = $('#annotationPanel');
+  if (!layer || !panel) return;
+  layer.querySelectorAll('.annotation-pin,.annotation-region').forEach(element => element.remove());
+  const visible = state.annotations;
+  visible.forEach((annotation, index) => {
+    const element = document.createElement('button');
+    element.type = 'button';
+    element.dataset.annotationId = annotation.annotation_id;
+    element.className = `${annotation.kind === 'region' ? 'annotation-region' : 'annotation-pin'}${annotation.resolved ? ' resolved' : ''}${annotation.stale ? ' stale' : ''}`;
+    element.title = annotation.text || `${annotation.kind} annotation ${index + 1}`;
+    if (annotation.kind === 'region') {
+      element.style.left = `${annotation.x * 100}%`;
+      element.style.top = `${annotation.y * 100}%`;
+      element.style.width = `${annotation.w * 100}%`;
+      element.style.height = `${annotation.h * 100}%`;
+      element.setAttribute('aria-label', `Region annotation ${index + 1}: ${annotation.text || 'No note'}`);
+    } else {
+      element.style.left = `${annotation.x * 100}%`;
+      element.style.top = `${annotation.y * 100}%`;
+      element.textContent = String(index + 1);
+      element.setAttribute('aria-label', `Point annotation ${index + 1}: ${annotation.text || 'No note'}`);
+    }
+    element.onclick = event => {
+      event.stopPropagation();
+      const row = panel.querySelector(`[data-annotation-row="${annotation.annotation_id}"]`);
+      if (row) row.scrollIntoView({block: 'nearest'});
+    };
+    layer.appendChild(element);
+  });
+  panel.classList.toggle('hidden', visible.length === 0);
+  panel.innerHTML = visible.map((annotation, index) => {
+    const stateLabel = annotation.stale ? 'stale after content change' : (annotation.resolved ? 'resolved' : 'open');
+    return `<div class="annotation-row${annotation.stale ? ' stale' : ''}" data-annotation-row="${esc(annotation.annotation_id)}">
+      <span class="annotation-index">${index + 1}</span>
+      <div class="annotation-copy"><strong>${esc(annotation.text || 'Untitled annotation')}</strong><span>${esc(annotation.kind)} · ${esc(stateLabel)}</span></div>
+      <div class="annotation-actions"><button type="button" data-annotation-resolve="${esc(annotation.annotation_id)}">${annotation.resolved ? 'Reopen' : 'Resolve'}</button><button type="button" data-annotation-delete="${esc(annotation.annotation_id)}">Delete</button></div>
+    </div>`;
+  }).join('');
+  panel.querySelectorAll('[data-annotation-resolve]').forEach(button => {
+    button.onclick = () => toggleAnnotationResolved(button.dataset.annotationResolve).catch(showError);
+  });
+  panel.querySelectorAll('[data-annotation-delete]').forEach(button => {
+    button.onclick = () => removeAnnotation(button.dataset.annotationDelete).catch(showError);
+  });
+}
+
+function normalizedPoint(event) {
+  const rect = $('#annotationLayer').getBoundingClientRect();
+  if (!rect.width || !rect.height) return null;
+  return {
+    x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
+    y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height)),
+  };
+}
+
+function setAnnotationMode(mode) {
+  state.annotationMode = mode;
+  state.annotationStart = null;
+  $('#annotationLayer').classList.toggle('drawing', Boolean(mode));
+  $('#pointAnnotation').classList.toggle('active', mode === 'point');
+  $('#regionAnnotation').classList.toggle('active', mode === 'region');
+  $('#cancelAnnotation').classList.toggle('hidden', !mode);
+  $('#annotationHelp').textContent = mode === 'point'
+    ? 'Click the exact point you want changed.'
+    : mode === 'region'
+      ? 'Drag a rectangle around the area you want changed.'
+      : 'Pin feedback directly to the image.';
+}
+
+function cancelAnnotationMode() {
+  state.annotationMode = null;
+  state.annotationStart = null;
+  const layer = $('#annotationLayer');
+  if (layer) {
+    layer.classList.remove('drawing');
+    layer.querySelectorAll('.annotation-draft').forEach(element => element.remove());
+  }
+  const point = $('#pointAnnotation');
+  const region = $('#regionAnnotation');
+  const cancel = $('#cancelAnnotation');
+  const help = $('#annotationHelp');
+  if (point) point.classList.remove('active');
+  if (region) region.classList.remove('active');
+  if (cancel) cancel.classList.add('hidden');
+  if (help) help.textContent = 'Pin feedback directly to the image.';
+}
+
+async function createSpatialAnnotation(kind, geometry) {
+  const asset = state.filtered[state.current];
+  if (!asset || !asset.asset_id) return;
+  const data = await apiPost('/api/annotation', {
+    collection: asset.collection,
+    asset_id: asset.asset_id,
+    action: 'create',
+    kind,
+    text: $('#annotationText').value,
+    ...geometry,
+  });
+  state.annotations.push(data.annotation);
+  $('#annotationText').value = '';
+  updateLocal(asset.asset_id, {annotation_count: (asset.annotation_count || 0) + 1});
+  renderAnnotations();
+  applyFilter();
+  cancelAnnotationMode();
+}
+
+async function toggleAnnotationResolved(annotationId) {
+  const asset = state.filtered[state.current];
+  const current = state.annotations.find(annotation => annotation.annotation_id === annotationId);
+  if (!asset || !current) return;
+  const data = await apiPost('/api/annotation', {
+    collection: asset.collection,
+    action: 'update',
+    annotation_id: annotationId,
+    resolved: !current.resolved,
+  });
+  state.annotations = state.annotations.map(annotation => annotation.annotation_id === annotationId ? data.annotation : annotation);
+  const openCount = state.annotations.filter(annotation => !annotation.resolved && !annotation.stale).length;
+  updateLocal(asset.asset_id, {annotation_count: openCount});
+  renderAnnotations();
+  applyFilter();
+}
+
+async function removeAnnotation(annotationId) {
+  const asset = state.filtered[state.current];
+  if (!asset) return;
+  await apiPost('/api/annotation', {collection: asset.collection, action: 'delete', annotation_id: annotationId});
+  state.annotations = state.annotations.filter(annotation => annotation.annotation_id !== annotationId);
+  const openCount = state.annotations.filter(annotation => !annotation.resolved && !annotation.stale).length;
+  updateLocal(asset.asset_id, {annotation_count: openCount});
+  renderAnnotations();
+  applyFilter();
+}
+
+function annotationPointerDown(event) {
+  if (!state.annotationMode || event.target.closest('.annotation-pin,.annotation-region')) return;
+  const point = normalizedPoint(event);
+  if (!point) return;
+  if (state.annotationMode === 'point') {
+    createSpatialAnnotation('point', {x: point.x, y: point.y, w: 0, h: 0}).catch(showError);
+    return;
+  }
+  state.annotationStart = point;
+  const draft = document.createElement('div');
+  draft.id = 'annotationDraft';
+  draft.className = 'annotation-draft';
+  draft.style.left = `${point.x * 100}%`;
+  draft.style.top = `${point.y * 100}%`;
+  draft.style.width = '0';
+  draft.style.height = '0';
+  $('#annotationLayer').appendChild(draft);
+  $('#annotationLayer').setPointerCapture?.(event.pointerId);
+}
+
+function annotationPointerMove(event) {
+  if (state.annotationMode !== 'region' || !state.annotationStart) return;
+  const point = normalizedPoint(event);
+  const draft = $('#annotationDraft');
+  if (!point || !draft) return;
+  const x = Math.min(state.annotationStart.x, point.x);
+  const y = Math.min(state.annotationStart.y, point.y);
+  const w = Math.abs(point.x - state.annotationStart.x);
+  const h = Math.abs(point.y - state.annotationStart.y);
+  draft.style.left = `${x * 100}%`;
+  draft.style.top = `${y * 100}%`;
+  draft.style.width = `${w * 100}%`;
+  draft.style.height = `${h * 100}%`;
+}
+
+function annotationPointerUp(event) {
+  if (state.annotationMode !== 'region' || !state.annotationStart) return;
+  const point = normalizedPoint(event);
+  const start = state.annotationStart;
+  state.annotationStart = null;
+  $('#annotationDraft')?.remove();
+  if (!point) return;
+  const x = Math.min(start.x, point.x);
+  const y = Math.min(start.y, point.y);
+  const w = Math.abs(point.x - start.x);
+  const h = Math.abs(point.y - start.y);
+  if (w < 0.01 || h < 0.01) {
+    $('#annotationHelp').textContent = 'Drag a larger region.';
+    return;
+  }
+  createSpatialAnnotation('region', {x, y, w, h}).catch(showError);
+}
+
 function clearSelection() {
   state.selected.clear();
   applyFilter();
@@ -347,6 +561,72 @@ function clearSelection() {
 
 function selectedAssets() {
   return state.images.filter(asset => state.selected.has(keyFor(asset))).slice(0, 4);
+}
+
+function resetCompareView(render = true) {
+  state.compareTransforms = state.compareAssets.map(() => ({scale: 1, x: 0, y: 0}));
+  state.compareDrag = null;
+  if (render) applyCompareTransforms();
+}
+
+function compareTransform(index) {
+  if (!state.compareTransforms[index]) state.compareTransforms[index] = {scale: 1, x: 0, y: 0};
+  return state.compareTransforms[index];
+}
+
+function applyCompareTransforms() {
+  document.querySelectorAll('[data-compare-image]').forEach(image => {
+    const index = Number(image.dataset.compareImage);
+    const transform = compareTransform(index);
+    image.style.transform = `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`;
+  });
+}
+
+function updateCompareTransform(index, patch) {
+  const indices = state.compareLinked ? state.compareAssets.map((_, i) => i) : [index];
+  for (const target of indices) {
+    const current = compareTransform(target);
+    state.compareTransforms[target] = {...current, ...patch};
+  }
+  applyCompareTransforms();
+}
+
+function attachCompareViewportHandlers() {
+  document.querySelectorAll('[data-compare-viewport]').forEach(viewport => {
+    const index = Number(viewport.dataset.compareViewport);
+    viewport.onwheel = event => {
+      event.preventDefault();
+      const current = compareTransform(index);
+      const factor = event.deltaY < 0 ? 1.12 : 0.89;
+      const scale = Math.max(1, Math.min(8, current.scale * factor));
+      const ratio = scale / current.scale;
+      const rect = viewport.getBoundingClientRect();
+      const pointerX = event.clientX - (rect.left + rect.width / 2);
+      const pointerY = event.clientY - (rect.top + rect.height / 2);
+      const x = scale === 1 ? 0 : current.x - pointerX * (ratio - 1);
+      const y = scale === 1 ? 0 : current.y - pointerY * (ratio - 1);
+      updateCompareTransform(index, {scale, x, y});
+    };
+    viewport.onpointerdown = event => {
+      if (event.button !== 0) return;
+      const current = compareTransform(index);
+      state.compareDrag = {index, startX: event.clientX, startY: event.clientY, x: current.x, y: current.y};
+      viewport.classList.add('dragging');
+      viewport.setPointerCapture?.(event.pointerId);
+    };
+    viewport.onpointermove = event => {
+      const drag = state.compareDrag;
+      if (!drag || drag.index !== index) return;
+      updateCompareTransform(index, {x: drag.x + event.clientX - drag.startX, y: drag.y + event.clientY - drag.startY});
+    };
+    const finish = () => {
+      state.compareDrag = null;
+      viewport.classList.remove('dragging');
+    };
+    viewport.onpointerup = finish;
+    viewport.onpointercancel = finish;
+    viewport.ondblclick = () => resetCompareView();
+  });
 }
 
 function renderCompare() {
@@ -360,32 +640,48 @@ function renderCompare() {
   });
   if (state.compareMode !== 'side' && assets.length !== 2) state.compareMode = 'side';
   overlayControl.classList.toggle('hidden', state.compareMode !== 'overlay');
+  $('#compareLink').classList.toggle('active', state.compareLinked);
+  $('#compareLink').textContent = state.compareLinked ? 'Linked zoom' : 'Independent zoom';
 
   if (state.compareMode === 'side') {
-    $('#compareHint').textContent = 'Side by side supports up to four assets.';
+    $('#compareHint').textContent = 'Scroll to zoom, drag to pan, double-click to reset. Linked view keeps variants aligned.';
     gridElement.className = 'compare-grid';
-    gridElement.innerHTML = assets.map(asset =>
-      `<article class="compare-item"><img src="${esc(assetSrc(asset))}" alt=""><div><strong>${esc(asset.name)}</strong><span>${esc(asset.status || 'unreviewed')}${asset.comment ? ' · ' + esc(asset.comment) : ''}</span></div></article>`
+    gridElement.innerHTML = assets.map((asset, index) =>
+      `<article class="compare-item"><div class="compare-viewport" data-compare-viewport="${index}"><img class="compare-pan-image" data-compare-image="${index}" src="${esc(assetSrc(asset))}" alt=""></div><div><strong>${esc(asset.name)}</strong><span>${esc(asset.status || 'unreviewed')}${asset.comment ? ' · ' + esc(asset.comment) : ''}</span></div></article>`
     ).join('');
+    attachCompareViewportHandlers();
+    applyCompareTransforms();
     return;
   }
 
   const [left, right] = assets;
   const difference = state.compareMode === 'difference';
   $('#compareHint').textContent = difference
-    ? 'Difference mode is clearest for equally sized variants.'
-    : 'Blend between two variants to spot composition changes.';
+    ? 'Difference view · scroll to zoom and drag to inspect changes.'
+    : 'Blend view · scroll to zoom and drag while comparing composition.';
   gridElement.className = 'compare-grid compare-single';
-  gridElement.innerHTML = `<div class="compare-stack ${difference ? 'difference' : ''}">
-    <img class="compare-bottom" src="${esc(assetSrc(left))}" alt="${esc(left.name)}">
-    <img class="compare-top" src="${esc(assetSrc(right))}" alt="${esc(right.name)}" style="opacity:${difference ? 1 : Number($('#overlayRange').value) / 100}">
+  gridElement.innerHTML = `<div class="compare-stack ${difference ? 'difference' : ''}" data-compare-viewport="0">
+    <img class="compare-bottom" data-compare-image="0" src="${esc(assetSrc(left))}" alt="${esc(left.name)}">
+    <img class="compare-top" data-compare-image="0" src="${esc(assetSrc(right))}" alt="${esc(right.name)}" style="opacity:${difference ? 1 : Number($('#overlayRange').value) / 100}">
     <div class="compare-stack-labels"><span>${esc(left.name)}</span><span>${esc(right.name)}</span></div>
   </div>`;
+  attachCompareViewportHandlers();
+  applyCompareTransforms();
 }
 
 function setCompareMode(mode) {
   if (mode !== 'side' && state.compareAssets.length !== 2) return;
   state.compareMode = mode;
+  if (mode !== 'side') state.compareLinked = true;
+  renderCompare();
+}
+
+function toggleCompareLinked() {
+  state.compareLinked = !state.compareLinked;
+  if (state.compareLinked && state.compareAssets.length) {
+    const source = {...compareTransform(0)};
+    state.compareTransforms = state.compareAssets.map(() => ({...source}));
+  }
   renderCompare();
 }
 
@@ -393,6 +689,8 @@ function openCompare() {
   state.compareAssets = selectedAssets();
   if (state.compareAssets.length < 2) return;
   state.compareMode = 'side';
+  state.compareLinked = true;
+  resetCompareView(false);
   $('#overlayRange').value = '50';
   renderCompare();
   compareModal.classList.remove('hidden');
@@ -422,7 +720,15 @@ $('#undoReview').onclick = () => undoReview().catch(showError);
 $('#showHistory').onclick = () => showHistory().catch(showError);
 $('#copyPath').onclick = () => copyPath().catch(showError);
 $('#copyReviewLink').onclick = () => copyReviewLink().catch(showError);
+$('#pointAnnotation').onclick = () => setAnnotationMode(state.annotationMode === 'point' ? null : 'point');
+$('#regionAnnotation').onclick = () => setAnnotationMode(state.annotationMode === 'region' ? null : 'region');
+$('#cancelAnnotation').onclick = cancelAnnotationMode;
+$('#annotationLayer').onpointerdown = annotationPointerDown;
+$('#annotationLayer').onpointermove = annotationPointerMove;
+$('#annotationLayer').onpointerup = annotationPointerUp;
 $('#compare').onclick = openCompare;
+$('#compareLink').onclick = toggleCompareLinked;
+$('#compareReset').onclick = () => resetCompareView();
 $('#closeCompare').onclick = closeCompare;
 $('#clearSelection').onclick = clearSelection;
 $('#overlayRange').oninput = () => {
@@ -447,7 +753,8 @@ document.onkeydown = event => {
   }
   if (modal.classList.contains('hidden')) return;
   if (event.target && (event.target.tagName === 'TEXTAREA' || event.target.tagName === 'INPUT')) return;
-  if (event.key === 'Escape') close();
+  if (event.key === 'Escape' && state.annotationMode) cancelAnnotationMode();
+  else if (event.key === 'Escape') close();
   else if (event.key === 'ArrowLeft') step(-1);
   else if (event.key === 'ArrowRight') step(1);
   else if (event.key.toLowerCase() === 'a') review('approved').catch(showError);

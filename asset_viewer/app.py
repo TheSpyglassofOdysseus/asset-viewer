@@ -6,6 +6,7 @@ import hmac
 import json
 import logging
 import mimetypes
+import multiprocessing
 import os
 import secrets
 import shutil
@@ -18,12 +19,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageOps
+from PIL import Image, ImageDraw
 
 from . import __version__
+from .preview_worker import inspect_images_worker, render_preview_worker
 from .storage import (
     IMAGE_EXTS,
     asset_rel,
+    annotations_for_asset,
+    create_annotation,
+    update_annotation,
+    delete_annotation,
     catalog_records,
     catalog_state,
     collection_review_state,
@@ -32,6 +38,7 @@ from .storage import (
     file_sha256,
     mark_seen,
     pending_summary,
+    prune_preview_cache,
     reconcile_catalog,
     reopen_collection_review,
     review_events_since,
@@ -66,7 +73,16 @@ SCAN_TTL_SECONDS = _env_int("ASSET_VIEWER_SCAN_TTL_SECONDS", 60)
 MAX_THUMBNAIL_SOURCE_BYTES = _env_int("ASSET_VIEWER_MAX_THUMBNAIL_BYTES", 250 * 1024 * 1024)
 MAX_IMAGE_PIXELS = _env_int("ASSET_VIEWER_MAX_IMAGE_PIXELS", 50_000_000)
 MAX_THUMBNAIL_CONCURRENCY = _env_int("ASSET_VIEWER_THUMBNAIL_WORKERS", 2)
+PREVIEW_PROCESS_TIMEOUT_SECONDS = _env_int("ASSET_VIEWER_PREVIEW_TIMEOUT_SECONDS", 15)
+PREVIEW_WORKER_MEMORY_BYTES = _env_int("ASSET_VIEWER_PREVIEW_MEMORY_MB", 768) * 1024 * 1024
+METADATA_BATCH_SIZE = _env_int("ASSET_VIEWER_METADATA_BATCH_SIZE", 512)
+PREVIEW_CACHE_MAX_BYTES = _env_int("ASSET_VIEWER_CACHE_MAX_MB", 2048) * 1024 * 1024
+PREVIEW_CACHE_MAX_AGE_SECONDS = _env_int("ASSET_VIEWER_CACHE_MAX_AGE_DAYS", 30) * 86400
+CACHE_PRUNE_INTERVAL_SECONDS = _env_int("ASSET_VIEWER_CACHE_PRUNE_INTERVAL_SECONDS", 300)
 THUMBNAIL_SEMAPHORE = threading.BoundedSemaphore(MAX_THUMBNAIL_CONCURRENCY)
+_CACHE_PRUNE_LOCK = threading.Lock()
+_LAST_CACHE_PRUNE = 0.0
+PROCESS_CONTEXT = multiprocessing.get_context("spawn")
 Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 
 
@@ -91,8 +107,13 @@ def capability_document() -> dict[str, Any]:
             "filesystem_lifecycle_events": True,
             "wait_for_review_cli": True,
             "asset_deep_links": True,
+            "spatial_annotations": True,
+            "annotation_kinds": ["point", "region"],
+            "annotation_events": True,
             "tombstones": True,
             "bounded_review_previews": True,
+            "process_isolated_previews": True,
+            "production_wsgi_server": True,
         },
         "limits": {
             "max_scan_files": MAX_SCAN_FILES,
@@ -101,8 +122,13 @@ def capability_document() -> dict[str, Any]:
             "max_thumbnail_source_bytes": MAX_THUMBNAIL_SOURCE_BYTES,
             "max_image_pixels": MAX_IMAGE_PIXELS,
             "thumbnail_concurrency": MAX_THUMBNAIL_CONCURRENCY,
+            "preview_process_timeout_seconds": PREVIEW_PROCESS_TIMEOUT_SECONDS,
+            "preview_worker_memory_bytes": PREVIEW_WORKER_MEMORY_BYTES,
+            "preview_cache_max_bytes": PREVIEW_CACHE_MAX_BYTES,
+            "preview_cache_max_age_seconds": PREVIEW_CACHE_MAX_AGE_SECONDS,
             "max_batch_review": 500,
             "max_comment_chars": 10000,
+            "max_annotation_chars": 4000,
         },
     }
 
@@ -132,23 +158,58 @@ def origin_matches_host(origin: str | None, host: str | None) -> bool:
         return False
 
 
-def _safe_dimension(path: Path) -> tuple[int, int, str | None]:
-    if path.suffix.lower() == ".svg":
-        return 0, 0, "SVG preview is intentionally raster-placeholder only"
+def _run_isolated_worker(target: Any, args: tuple[Any, ...], timeout: float) -> dict[str, Any]:
+    receiver, sender = PROCESS_CONTEXT.Pipe(duplex=False)
+    process = PROCESS_CONTEXT.Process(target=target, args=(*args, sender), daemon=True)
     try:
-        stat = path.stat()
-        if stat.st_size > MAX_THUMBNAIL_SOURCE_BYTES:
-            return 0, 0, "file exceeds preview size limit"
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", Image.DecompressionBombWarning)
-            with Image.open(path) as image:
-                width, height = image.size
-                if width * height > MAX_IMAGE_PIXELS:
-                    return 0, 0, "image exceeds preview pixel limit"
-                return width, height, None
-    except (OSError, ValueError, Image.DecompressionBombWarning, Image.DecompressionBombError) as exc:
-        LOGGER.warning("preview metadata unavailable for %s: %s", path, exc)
-        return 0, 0, "preview metadata unavailable"
+        process.start()
+        sender.close()
+        if receiver.poll(timeout):
+            try:
+                payload = receiver.recv()
+            except EOFError:
+                payload = {"ok": False, "error": "worker exited without a result"}
+        else:
+            payload = {"ok": False, "error": "worker timeout"}
+            process.terminate()
+        process.join(timeout=1.0)
+        if process.is_alive():
+            process.kill()
+            process.join(timeout=1.0)
+        return payload if isinstance(payload, dict) else {"ok": False, "error": "invalid worker response"}
+    finally:
+        try:
+            sender.close()
+        except OSError:
+            pass
+        receiver.close()
+        if process.is_alive():
+            process.kill()
+            process.join(timeout=1.0)
+
+
+def _inspect_dimensions_isolated(paths: list[Path]) -> dict[str, tuple[int, int, str | None]]:
+    results: dict[str, tuple[int, int, str | None]] = {}
+    for offset in range(0, len(paths), METADATA_BATCH_SIZE):
+        batch = paths[offset:offset + METADATA_BATCH_SIZE]
+        payload = _run_isolated_worker(
+            inspect_images_worker,
+            ([str(path) for path in batch], MAX_THUMBNAIL_SOURCE_BYTES, MAX_IMAGE_PIXELS, PREVIEW_WORKER_MEMORY_BYTES),
+            PREVIEW_PROCESS_TIMEOUT_SECONDS,
+        )
+        worker_results = payload.get("results", {}) if isinstance(payload, dict) else {}
+        for path in batch:
+            item = worker_results.get(str(path)) if isinstance(worker_results, dict) else None
+            if item:
+                error = item.get("error")
+                if path.suffix.lower() == ".svg" and not error:
+                    error = "SVG preview is intentionally raster-placeholder only"
+                results[str(path)] = (int(item.get("width") or 0), int(item.get("height") or 0), error)
+            else:
+                results[str(path)] = (0, 0, "preview metadata unavailable")
+        if not payload.get("ok"):
+            LOGGER.warning("isolated metadata worker failed: %s", payload.get("error", "unknown error"))
+    return results
 
 
 def _catalog_fresh(state: dict[str, Any]) -> bool:
@@ -187,6 +248,7 @@ def _gallery_rows(slug: str, records: list[dict[str, Any]]) -> list[dict[str, An
             "updated_at": record.get("updated_at"),
             "preview_error": record.get("preview_error"),
             "present": bool(record.get("present", 1)),
+            "annotation_count": int(record.get("annotation_count") or 0),
             "thumb": f"/asset/thumb/{slug}/{quoted}",
             "preview": f"/asset/preview/{slug}/{quoted}",
             "file": f"/asset/file/{slug}/{quoted}",
@@ -216,6 +278,7 @@ def scan_collection(slug: str, force: bool = False) -> tuple[list[dict[str, Any]
         if row.get("device") and row.get("inode")
     }
     discoveries: list[dict[str, Any]] = []
+    pending_metadata: list[Path] = []
     truncated = False
     reason = None
     visited = 0
@@ -245,14 +308,20 @@ def scan_collection(slug: str, force: bool = False) -> tuple[list[dict[str, Any]
                     stat = resolved.stat()
                     prior = by_rel.get(rel) or by_identity.get((int(stat.st_dev), int(stat.st_ino)))
                     review_hash_mismatch = False
+                    annotation_hash_mismatch = False
                     if prior and prior.get("size") == stat.st_size and prior.get("mtime_ns") == stat.st_mtime_ns:
                         width = prior.get("width") or 0
                         height = prior.get("height") or 0
                         preview_error = prior.get("preview_error")
-                        if prior.get("status") and prior.get("review_sha256"):
-                            review_hash_mismatch = file_sha256(resolved) != prior.get("review_sha256")
+                        expected_review = prior.get("review_sha256") if prior.get("status") else None
+                        expected_annotation = prior.get("annotation_sha256")
+                        if expected_review or expected_annotation:
+                            observed_hash = file_sha256(resolved)
+                            review_hash_mismatch = bool(expected_review and observed_hash != expected_review)
+                            annotation_hash_mismatch = bool(expected_annotation and observed_hash != expected_annotation)
                     else:
-                        width, height, preview_error = _safe_dimension(resolved)
+                        width, height, preview_error = 0, 0, None
+                        pending_metadata.append(resolved)
                     discoveries.append({
                         "rel": rel,
                         "device": int(stat.st_dev),
@@ -263,6 +332,8 @@ def scan_collection(slug: str, force: bool = False) -> tuple[list[dict[str, Any]
                         "height": int(height or 0),
                         "preview_error": preview_error,
                         "review_hash_mismatch": review_hash_mismatch,
+                        "annotation_hash_mismatch": annotation_hash_mismatch,
+                        "_source": str(resolved),
                     })
                 except OSError as exc:
                     LOGGER.warning("skipping unreadable asset %s: %s", path, exc)
@@ -271,6 +342,16 @@ def scan_collection(slug: str, force: bool = False) -> tuple[list[dict[str, Any]
     except OSError as exc:
         LOGGER.warning("collection scan failed for %s: %s", slug, exc)
         truncated, reason = True, "scan_error"
+
+    if pending_metadata:
+        dimensions = _inspect_dimensions_isolated(pending_metadata)
+        for item in discoveries:
+            source_text = item.pop("_source", None)
+            if source_text and source_text in dimensions and not (item.get("width") or item.get("height")):
+                item["width"], item["height"], item["preview_error"] = dimensions[source_text]
+    else:
+        for item in discoveries:
+            item.pop("_source", None)
 
     elapsed_ms = round((time.monotonic() - started) * 1000)
     state = reconcile_catalog(slug, discoveries, truncated=truncated, reason=reason, elapsed_ms=elapsed_ms)
@@ -300,7 +381,30 @@ def _placeholder_preview(path: Path, reason: str, size: tuple[int, int], destina
     return destination.read_bytes()
 
 
+def _maybe_prune_preview_cache() -> None:
+    global _LAST_CACHE_PRUNE
+    now = time.monotonic()
+    if now - _LAST_CACHE_PRUNE < CACHE_PRUNE_INTERVAL_SECONDS:
+        return
+    if not _CACHE_PRUNE_LOCK.acquire(blocking=False):
+        return
+    try:
+        now = time.monotonic()
+        if now - _LAST_CACHE_PRUNE < CACHE_PRUNE_INTERVAL_SECONDS:
+            return
+        result = prune_preview_cache(PREVIEW_CACHE_MAX_BYTES, PREVIEW_CACHE_MAX_AGE_SECONDS)
+        _LAST_CACHE_PRUNE = now
+        if result.get("removed_files"):
+            LOGGER.info(
+                "preview cache pruned files=%s bytes=%s remaining_bytes=%s",
+                result["removed_files"], result["removed_bytes"], result["bytes"],
+            )
+    finally:
+        _CACHE_PRUNE_LOCK.release()
+
+
 def _render_preview(path: Path, destination: Path, max_size: tuple[int, int]) -> bytes:
+    _maybe_prune_preview_cache()
     if destination.exists():
         return destination.read_bytes()
     placeholder_size = (640, 480) if max(max_size) <= 640 else (1280, 900)
@@ -309,30 +413,18 @@ def _render_preview(path: Path, destination: Path, max_size: tuple[int, int]) ->
     with THUMBNAIL_SEMAPHORE:
         if destination.exists():
             return destination.read_bytes()
-        if path.stat().st_size > MAX_THUMBNAIL_SOURCE_BYTES:
-            return _placeholder_preview(path, "Preview skipped: file exceeds configured size limit", placeholder_size, destination)
-        try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("error", Image.DecompressionBombWarning)
-                with Image.open(path) as image:
-                    if image.width * image.height > MAX_IMAGE_PIXELS:
-                        return _placeholder_preview(path, "Preview skipped: image exceeds configured pixel limit", placeholder_size, destination)
-                    image = ImageOps.exif_transpose(image)
-                    image.thumbnail(max_size, Image.Resampling.LANCZOS)
-                    if image.mode not in ("RGB", "L"):
-                        background = Image.new("RGB", image.size, (17, 17, 17))
-                        if "A" in image.getbands():
-                            background.paste(image, mask=image.getchannel("A"))
-                        else:
-                            background.paste(image.convert("RGB"))
-                        image = background
-                    elif image.mode == "L":
-                        image = image.convert("RGB")
-                    image.save(destination, "JPEG", quality=84, optimize=True)
+        # Source-byte validation belongs inside the disposable decoder worker.
+        # Avoid a second parent-process filesystem touch after safe_file() has
+        # already established collection containment.
+        payload = _run_isolated_worker(
+            render_preview_worker,
+            (str(path), str(destination), max_size, MAX_THUMBNAIL_SOURCE_BYTES, MAX_IMAGE_PIXELS, PREVIEW_WORKER_MEMORY_BYTES),
+            PREVIEW_PROCESS_TIMEOUT_SECONDS,
+        )
+        if payload.get("ok") and destination.exists():
             return destination.read_bytes()
-        except (OSError, ValueError, Image.DecompressionBombWarning, Image.DecompressionBombError) as exc:
-            LOGGER.warning("preview generation failed for %s: %s", path, exc)
-            return _placeholder_preview(path, "Preview unavailable: invalid or unsupported image", placeholder_size, destination)
+        LOGGER.warning("isolated preview worker failed for %s: %s", path, payload.get("error", "unknown error"))
+        return _placeholder_preview(path, "Preview unavailable: isolated decoder rejected or timed out", placeholder_size, destination)
 
 
 def make_thumbnail(path: Path) -> bytes:
@@ -498,6 +590,19 @@ class AssetViewerHandler(BaseHTTPRequestHandler):
                 return self._send_json(200, pending_summary(collection))
             except ValueError as exc:
                 return self._send_json(400, {"error": str(exc)})
+        if path == "/api/annotations":
+            query = urllib.parse.parse_qs(parsed.query)
+            collection = (query.get("collection") or [""])[0]
+            asset_id = (query.get("asset_id") or [""])[0]
+            include_stale = (query.get("stale") or ["1"])[0].lower() not in {"0", "false", "no"}
+            if not collection or not asset_id:
+                return self._send_json(400, {"error": "collection and asset_id are required"})
+            if not any(row["slug"] == collection for row in collections()):
+                return self._send_json(404, {"error": "collection not found"})
+            return self._send_json(200, {
+                "version": 1, "collection": collection, "asset_id": asset_id,
+                "annotations": annotations_for_asset(collection, asset_id, include_stale=include_stale),
+            })
         if path == "/api/review-history":
             query = urllib.parse.parse_qs(parsed.query)
             collection = (query.get("collection") or [""])[0]
@@ -579,6 +684,35 @@ class AssetViewerHandler(BaseHTTPRequestHandler):
                     raise ValueError("invalid seen request")
                 changed = mark_seen(slug, rels)
                 return self._send_json(200, {"ok": True, "changed": changed})
+            if path == "/api/annotation":
+                asset_id = str(payload.get("asset_id", ""))
+                action = str(payload.get("action", "create"))
+                if action == "create":
+                    rel = asset_rel(slug, asset_id)
+                    if not rel or not safe_file(slug, rel):
+                        raise ValueError("asset not found")
+                    annotation = create_annotation(
+                        slug, asset_id, str(payload.get("kind", "point")),
+                        payload.get("x"), payload.get("y"),
+                        w=payload.get("w", 0), h=payload.get("h", 0), text=str(payload.get("text", "")),
+                    )
+                    return self._send_json(201, {"ok": True, "annotation": annotation})
+                annotation_id = str(payload.get("annotation_id", ""))
+                if not annotation_id:
+                    raise ValueError("annotation_id is required")
+                if action == "update":
+                    text = payload.get("text")
+                    if text is not None and not isinstance(text, str):
+                        raise ValueError("annotation text must be a string")
+                    resolved = payload.get("resolved")
+                    if resolved is not None and not isinstance(resolved, bool):
+                        raise ValueError("resolved must be boolean")
+                    annotation = update_annotation(slug, annotation_id, text=text, resolved=resolved)
+                    return self._send_json(200, {"ok": True, "annotation": annotation})
+                if action == "delete":
+                    annotation = delete_annotation(slug, annotation_id)
+                    return self._send_json(200, {"ok": True, "annotation": annotation})
+                raise ValueError("annotation action must be create, update, or delete")
             if path == "/api/complete":
                 state = complete_collection_review(slug)
                 return self._send_json(200, {"ok": True, "review_state": state})

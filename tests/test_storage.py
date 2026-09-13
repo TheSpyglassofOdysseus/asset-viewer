@@ -160,6 +160,22 @@ class StorageTests(unittest.TestCase):
         self.assertTrue(state["stale"])
         self.assertTrue(state["pending"])
 
+    def test_preview_cache_budget_prunes_oldest_files(self):
+        cache = storage.cache_dir()
+        old = cache / "thumb-old.jpg"
+        new = cache / "thumb-new.jpg"
+        old.write_bytes(b"a" * 100)
+        new.write_bytes(b"b" * 100)
+        os.utime(old, (1, 1))
+        os.utime(new, (2, 2))
+        status = storage.preview_cache_status()
+        self.assertEqual(status["files"], 2)
+        result = storage.prune_preview_cache(100, 0)
+        self.assertEqual(result["files"], 1)
+        self.assertFalse(old.exists())
+        self.assertTrue(new.exists())
+        self.assertEqual(result["removed_files"], 1)
+
     def test_state_files_are_private(self):
         storage.add_collection(str(self.images), "Images")
         storage.set_review("images", "frame.png", "approved")

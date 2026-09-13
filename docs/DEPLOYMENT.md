@@ -8,7 +8,7 @@ The safest default is also the simplest:
 asset-viewer serve
 ```
 
-This listens on `127.0.0.1:8160`.
+This listens on `127.0.0.1:8160` using Waitress. Use `--development-server` only for debugging the legacy stdlib path.
 
 ## Private remote access
 
@@ -26,7 +26,7 @@ A reverse proxy can then terminate TLS and provide authentication or VPN-only ac
 
 A direct bind such as `--host 0.0.0.0` is intentionally harder to enable. It requires at least one `--trusted-host` **and** built-in Basic authentication through `ASSET_VIEWER_PASSWORD`. If another private/authenticated boundary already provides access control, `--allow-unauthenticated-remote` can explicitly acknowledge that design.
 
-The built-in Python HTTP server remains a local/private serving layer, not an internet-facing production application server. Prefer loopback + a hardened reverse proxy.
+The normal server is Waitress. Prefer loopback + a TLS-terminating authenticated/private reverse proxy for remote access. The legacy Python stdlib server is development-only and requires `--development-server`. Built-in Basic auth is not encryption; do not send credentials over untrusted cleartext HTTP.
 
 ## Resource limits
 
@@ -39,9 +39,16 @@ ASSET_VIEWER_MAX_THUMBNAIL_BYTES=262144000
 ASSET_VIEWER_MAX_IMAGE_PIXELS=50000000
 ASSET_VIEWER_THUMBNAIL_WORKERS=2
 ASSET_VIEWER_SCAN_TTL_SECONDS=60
+ASSET_VIEWER_PREVIEW_TIMEOUT_SECONDS=15
+ASSET_VIEWER_PREVIEW_MEMORY_MB=768
+ASSET_VIEWER_METADATA_BATCH_SIZE=512
+ASSET_VIEWER_CACHE_MAX_MB=2048
+ASSET_VIEWER_CACHE_MAX_AGE_DAYS=30
 ```
 
-`asset-viewer doctor` reports the effective deployment posture, unavailable collection paths, catalog scan state, and these resource-limit settings.
+`asset-viewer doctor` reports the effective deployment posture, unavailable collection paths, catalog scan state, Waitress availability, preview-cache state, and resource-limit settings. `asset-viewer cache status` and `asset-viewer cache prune` provide explicit cache management.
+
+If you deliberately embed the WSGI application in a multi-process server rather than using `asset-viewer serve`, set one shared `ASSET_VIEWER_CSRF_TOKEN` for all workers so browser sessions do not receive worker-specific mutation tokens.
 
 ## systemd example
 

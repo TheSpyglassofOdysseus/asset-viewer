@@ -2,6 +2,22 @@
 
 All notable changes to Asset Viewer will be documented here.
 
+## 0.5.0 — 2026-09-13
+
+Precision-review and production-runtime release.
+
+- Add point and rectangle annotations using normalized image coordinates, stable asset IDs, resolve/reopen state, event-feed integration, CLI/API support, and machine-readable manifest output.
+- Bind spatial annotations to SHA-256 fingerprints of the annotated bytes so same-size/same-timestamp replacements mark location feedback stale instead of silently applying it to different pixels.
+- Add in-view annotation tools and pinned feedback overlays without modifying source assets.
+- Add linked/independent zoom and pan across comparison panes, plus reset controls, while preserving side-by-side, overlay, and difference modes.
+- Make Waitress the default production HTTP serving layer; retain the stdlib server only as an explicit development mode.
+- Move raster metadata inspection and thumbnail/review-preview decoding into disposable child processes with timeout, address-space/file-size limits, atomic cache publication, and bounded concurrency.
+- Add preview-cache size/age policy, deterministic eviction, `asset-viewer cache`, and cache diagnostics in `doctor`.
+- Add annotation, WSGI, worker-timeout, cache-budget, fingerprint-integrity, API, and CLI regression coverage.
+- Keep full-file integrity hashing outside SQLite write transactions to avoid blocking concurrent review-state writes on large originals.
+- Allow deliberate multi-process WSGI deployments to share CSRF state through `ASSET_VIEWER_CSRF_TOKEN`.
+- Expand the public API/schema contract and publish a third security audit plus a second competitive feature audit.
+
 ## 0.4.0 — 2026-09-13
 
 Durable catalog and agent-event release.

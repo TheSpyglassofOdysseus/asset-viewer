@@ -1,12 +1,20 @@
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
 from PIL import Image
 
-from asset_viewer.app import host_is_trusted, image_rows, make_thumbnail, origin_matches_host, serve
+from asset_viewer.app import _run_isolated_worker, host_is_trusted, image_rows, make_thumbnail, origin_matches_host, serve
 from asset_viewer.storage import add_collection
+
+
+def sleeping_worker(seconds, sender):
+    time.sleep(seconds)
+    sender.send({"ok": True})
+    sender.close()
+
 
 
 class AppTests(unittest.TestCase):
@@ -33,6 +41,11 @@ class AppTests(unittest.TestCase):
     def test_thumbnail_generation(self):
         blob = make_thumbnail(self.images / "sample.png")
         self.assertGreater(len(blob), 100)
+
+    def test_isolated_worker_timeout_fails_closed(self):
+        payload = _run_isolated_worker(sleeping_worker, (1.0,), 0.05)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"], "worker timeout")
 
     def test_host_validation(self):
         trusted = {"127.0.0.1", "localhost", "::1", "gallery.example.com"}

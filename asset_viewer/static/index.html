@@ -27,12 +27,23 @@
 <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Image review">
   <button class="icon-button close" id="close" type="button" aria-label="Close">×</button><button class="icon-button nav prev" id="prev" type="button" aria-label="Previous image">‹</button>
   <section class="stage">
-    <img id="full" alt="">
+    <div id="imageSurface" class="image-surface">
+      <img id="full" alt="">
+      <div id="annotationLayer" class="annotation-layer" aria-label="Spatial annotations"></div>
+    </div>
     <div class="meta">
       <div class="identity"><strong id="filename"></strong><span id="details"></span><span id="previewNotice" class="preview-notice hidden"></span></div>
       <div class="review"><button class="approve" data-status="approved" type="button">✓ Approve</button><button class="maybe" data-status="maybe" type="button">? Maybe</button><button class="reject" data-status="rejected" type="button">× Reject</button><button data-status="" type="button">Clear</button><button id="undoReview" type="button">↶ Undo</button><button id="showHistory" type="button">History</button><button id="copyPath" type="button">Copy path</button><button id="copyReviewLink" type="button">Copy review link</button><a id="original" target="_blank" rel="noreferrer">Open original</a></div>
     </div>
     <div class="comment-row"><textarea id="comment" maxlength="10000" placeholder="Review note for the next agent…" aria-label="Review note"></textarea><button id="saveComment" type="button">Save note</button></div>
+    <div class="annotation-toolbar">
+      <input id="annotationText" maxlength="4000" placeholder="Precise feedback, e.g. “move this logo left”…" aria-label="Annotation note">
+      <button id="pointAnnotation" type="button">＋ Point</button>
+      <button id="regionAnnotation" type="button">▭ Region</button>
+      <button id="cancelAnnotation" class="hidden" type="button">Cancel</button>
+      <span id="annotationHelp">Pin feedback directly to the image.</span>
+    </div>
+    <div id="annotationPanel" class="annotation-panel hidden"></div>
     <div id="historyPanel" class="history-panel hidden"></div>
   </section>
   <button class="icon-button nav next" id="next" type="button" aria-label="Next image">›</button>
@@ -47,6 +58,8 @@
         <button type="button" data-compare-mode="side" class="active">Side by side</button>
         <button type="button" data-compare-mode="overlay">Overlay</button>
         <button type="button" data-compare-mode="difference">Difference</button>
+        <button id="compareLink" type="button" class="active">Linked zoom</button>
+        <button id="compareReset" type="button">Reset view</button>
         <label id="overlayControl" class="overlay-control hidden">Blend <input id="overlayRange" type="range" min="0" max="100" value="50"></label>
       </div>
     </div>
