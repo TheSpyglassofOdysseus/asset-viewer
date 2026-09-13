@@ -17,6 +17,8 @@
       <select id="collection" aria-label="Collection"></select>
       <select id="filter" aria-label="Review status">
         <option value="all">All images</option>
+        <option value="new">New</option>
+        <option value="new">New / unseen</option>
         <option value="unreviewed">Unreviewed</option>
         <option value="approved">Approved</option>
         <option value="maybe">Maybe</option>
@@ -25,6 +27,17 @@
       <button id="refresh" type="button">Refresh</button>
     </div>
   </header>
+
+  <div id="bulkbar" class="bulkbar hidden">
+    <strong id="selectedCount">0 selected</strong>
+    <button data-bulk-status="approved" type="button">✓ Approve</button>
+    <button data-bulk-status="maybe" type="button">? Maybe</button>
+    <button data-bulk-status="rejected" type="button">× Reject</button>
+    <button data-bulk-status="" type="button">Clear review</button>
+    <button id="compare" type="button">Compare</button>
+    <button id="clearSelection" type="button">Clear selection</button>
+  </div>
+
   <main>
     <div id="empty" class="empty hidden">
       <strong>No images in this view.</strong>
@@ -32,13 +45,19 @@
     </div>
     <div id="grid" class="grid"></div>
   </main>
+
   <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Image review">
     <button class="icon-button close" id="close" type="button" aria-label="Close">×</button>
     <button class="icon-button nav prev" id="prev" type="button" aria-label="Previous image">‹</button>
     <section class="stage">
       <img id="full" alt="">
       <div class="meta">
-        <div class="identity"><strong id="filename"></strong><span id="details"></span></div>
+        <div class="identity">
+          <strong id="filename"></strong>
+          <span id="details"></span>
+          <span id="previewNotice" class="preview-notice hidden"></span>
+        </div>
+        <div class="comment-box"><textarea id="comment" maxlength="10000" rows="2" placeholder="Review note for the next agent…"></textarea><button id="save-comment" type="button">Save note</button><span id="comment-status"></span></div>
         <div class="review">
           <button class="approve" data-status="approved" type="button">✓ Approve</button>
           <button class="maybe" data-status="maybe" type="button">? Maybe</button>
@@ -47,9 +66,22 @@
           <a id="original" target="_blank" rel="noreferrer">Open original</a>
         </div>
       </div>
+      <div class="comment-row">
+        <textarea id="comment" maxlength="10000" placeholder="Review note for this asset…" aria-label="Review note"></textarea>
+        <button id="saveComment" type="button">Save note</button>
+      </div>
     </section>
     <button class="icon-button nav next" id="next" type="button" aria-label="Next image">›</button>
   </div>
+
+  <div id="compareModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Compare selected assets">
+    <button class="icon-button close" id="closeCompare" type="button" aria-label="Close comparison">×</button>
+    <section class="compare-stage">
+      <div class="compare-heading"><strong>Compare selected assets</strong><span>Up to four at a time</span></div>
+      <div id="compareGrid" class="compare-grid"></div>
+    </section>
+  </div>
+
   <script src="/app.js"></script>
 </body>
 </html>

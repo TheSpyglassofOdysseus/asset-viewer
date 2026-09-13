@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from asset_viewer.app import image_rows, make_thumbnail
+from asset_viewer.app import host_is_trusted, image_rows, make_thumbnail, origin_matches_host, serve
 from asset_viewer.storage import add_collection
 
 
@@ -33,6 +33,24 @@ class AppTests(unittest.TestCase):
     def test_thumbnail_generation(self):
         blob = make_thumbnail(self.images / "sample.png")
         self.assertGreater(len(blob), 100)
+
+    def test_host_validation(self):
+        trusted = {"127.0.0.1", "localhost", "::1", "gallery.example.com"}
+        self.assertTrue(host_is_trusted("127.0.0.1:8160", trusted))
+        self.assertTrue(host_is_trusted("gallery.example.com", trusted))
+        self.assertFalse(host_is_trusted("attacker.example", trusted))
+        self.assertFalse(host_is_trusted(None, trusted))
+
+    def test_origin_validation(self):
+        self.assertTrue(origin_matches_host("http://127.0.0.1:8160", "127.0.0.1:8160"))
+        self.assertTrue(origin_matches_host("https://gallery.example.com", "gallery.example.com"))
+        self.assertFalse(origin_matches_host("https://attacker.example", "gallery.example.com"))
+        self.assertTrue(origin_matches_host(None, "gallery.example.com"))
+        self.assertFalse(origin_matches_host("null", "gallery.example.com"))
+
+    def test_non_loopback_bind_requires_trusted_host(self):
+        with self.assertRaises(ValueError):
+            serve("0.0.0.0", 0, [])
 
 
 if __name__ == "__main__":
