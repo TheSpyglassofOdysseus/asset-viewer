@@ -2,6 +2,20 @@
 
 All notable changes to Asset Viewer will be documented here.
 
+## 0.3.0 — 2026-09-13
+
+Agent-review workflow release.
+
+- Add explicit collection review completion/reopen state.
+- Add `asset-viewer pending` with automation-friendly exit codes (`2` pending, `0` complete).
+- Add review event history and one-step undo for status/comment changes.
+- Add `history`, `undo`, and `collection-url` CLI commands.
+- Add read-only pending/history APIs plus CSRF-protected complete/reopen/undo endpoints.
+- Add filename/path search and client-side sort controls.
+- Surface review progress/completion directly in the gallery.
+- Fix duplicate `New` filter and duplicate review-note DOM IDs from the v0.2 UI.
+- Increase review timestamps to microsecond precision so new work reliably invalidates older completion state.
+
 ## 0.2.0 — 2026-09-13
 
 Security hardening and closed-loop review foundation.

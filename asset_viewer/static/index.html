@@ -2,86 +2,42 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="robots" content="noindex,nofollow">
   <title>Asset Viewer</title>
   <link rel="stylesheet" href="/app.css">
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand">
-      <div class="mark" aria-hidden="true">AV</div>
-      <div><strong>Asset Viewer</strong><span id="summary">Loading…</span></div>
-    </div>
-    <div class="tools">
-      <select id="collection" aria-label="Collection"></select>
-      <select id="filter" aria-label="Review status">
-        <option value="all">All images</option>
-        <option value="new">New</option>
-        <option value="new">New / unseen</option>
-        <option value="unreviewed">Unreviewed</option>
-        <option value="approved">Approved</option>
-        <option value="maybe">Maybe</option>
-        <option value="rejected">Rejected</option>
-      </select>
-      <button id="refresh" type="button">Refresh</button>
-    </div>
-  </header>
-
-  <div id="bulkbar" class="bulkbar hidden">
-    <strong id="selectedCount">0 selected</strong>
-    <button data-bulk-status="approved" type="button">✓ Approve</button>
-    <button data-bulk-status="maybe" type="button">? Maybe</button>
-    <button data-bulk-status="rejected" type="button">× Reject</button>
-    <button data-bulk-status="" type="button">Clear review</button>
-    <button id="compare" type="button">Compare</button>
-    <button id="clearSelection" type="button">Clear selection</button>
+<header class="topbar">
+  <div class="brand"><div class="mark" aria-hidden="true">AV</div><div><strong>Asset Viewer</strong><span id="summary">Loading…</span></div></div>
+  <div class="tools">
+    <select id="collection" aria-label="Collection"></select>
+    <input id="search" type="search" placeholder="Search filename or path…" aria-label="Search assets">
+    <select id="filter" aria-label="Review status">
+      <option value="all">All images</option><option value="new">New / unseen</option><option value="unreviewed">Unreviewed</option><option value="approved">Approved</option><option value="maybe">Maybe</option><option value="rejected">Rejected</option>
+    </select>
+    <select id="sort" aria-label="Sort assets"><option value="newest">Newest</option><option value="oldest">Oldest</option><option value="name">Name</option><option value="status">Review status</option></select>
+    <button id="reviewComplete" type="button">Review status</button>
+    <button id="refresh" type="button">Refresh</button>
   </div>
+</header>
+<div id="bulkbar" class="bulkbar hidden"><strong id="selectedCount">0 selected</strong><button data-bulk-status="approved" type="button">✓ Approve</button><button data-bulk-status="maybe" type="button">? Maybe</button><button data-bulk-status="rejected" type="button">× Reject</button><button data-bulk-status="" type="button">Clear review</button><button id="compare" type="button">Compare</button><button id="clearSelection" type="button">Clear selection</button></div>
+<main><div id="empty" class="empty hidden"><strong>No images in this view.</strong><span>Try another filter/search or register a folder with <code>asset-viewer add /path/to/images</code>.</span></div><div id="grid" class="grid"></div></main>
 
-  <main>
-    <div id="empty" class="empty hidden">
-      <strong>No images in this view.</strong>
-      <span>Register a folder with <code>asset-viewer add /path/to/images</code>.</span>
+<div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Image review">
+  <button class="icon-button close" id="close" type="button" aria-label="Close">×</button><button class="icon-button nav prev" id="prev" type="button" aria-label="Previous image">‹</button>
+  <section class="stage">
+    <img id="full" alt="">
+    <div class="meta">
+      <div class="identity"><strong id="filename"></strong><span id="details"></span><span id="previewNotice" class="preview-notice hidden"></span></div>
+      <div class="review"><button class="approve" data-status="approved" type="button">✓ Approve</button><button class="maybe" data-status="maybe" type="button">? Maybe</button><button class="reject" data-status="rejected" type="button">× Reject</button><button data-status="" type="button">Clear</button><button id="undoReview" type="button">↶ Undo</button><button id="showHistory" type="button">History</button><a id="original" target="_blank" rel="noreferrer">Open original</a></div>
     </div>
-    <div id="grid" class="grid"></div>
-  </main>
+    <div class="comment-row"><textarea id="comment" maxlength="10000" placeholder="Review note for the next agent…" aria-label="Review note"></textarea><button id="saveComment" type="button">Save note</button></div>
+    <div id="historyPanel" class="history-panel hidden"></div>
+  </section>
+  <button class="icon-button nav next" id="next" type="button" aria-label="Next image">›</button>
+</div>
 
-  <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Image review">
-    <button class="icon-button close" id="close" type="button" aria-label="Close">×</button>
-    <button class="icon-button nav prev" id="prev" type="button" aria-label="Previous image">‹</button>
-    <section class="stage">
-      <img id="full" alt="">
-      <div class="meta">
-        <div class="identity">
-          <strong id="filename"></strong>
-          <span id="details"></span>
-          <span id="previewNotice" class="preview-notice hidden"></span>
-        </div>
-        <div class="comment-box"><textarea id="comment" maxlength="10000" rows="2" placeholder="Review note for the next agent…"></textarea><button id="save-comment" type="button">Save note</button><span id="comment-status"></span></div>
-        <div class="review">
-          <button class="approve" data-status="approved" type="button">✓ Approve</button>
-          <button class="maybe" data-status="maybe" type="button">? Maybe</button>
-          <button class="reject" data-status="rejected" type="button">× Reject</button>
-          <button data-status="" type="button">Clear</button>
-          <a id="original" target="_blank" rel="noreferrer">Open original</a>
-        </div>
-      </div>
-      <div class="comment-row">
-        <textarea id="comment" maxlength="10000" placeholder="Review note for this asset…" aria-label="Review note"></textarea>
-        <button id="saveComment" type="button">Save note</button>
-      </div>
-    </section>
-    <button class="icon-button nav next" id="next" type="button" aria-label="Next image">›</button>
-  </div>
-
-  <div id="compareModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Compare selected assets">
-    <button class="icon-button close" id="closeCompare" type="button" aria-label="Close comparison">×</button>
-    <section class="compare-stage">
-      <div class="compare-heading"><strong>Compare selected assets</strong><span>Up to four at a time</span></div>
-      <div id="compareGrid" class="compare-grid"></div>
-    </section>
-  </div>
-
-  <script src="/app.js"></script>
-</body>
-</html>
+<div id="compareModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Compare selected assets"><button class="icon-button close" id="closeCompare" type="button" aria-label="Close comparison">×</button><section class="compare-stage"><div class="compare-heading"><strong>Compare selected assets</strong><span>Up to four at a time</span></div><div id="compareGrid" class="compare-grid"></div></section></div>
+<script src="/app.js"></script>
+</body></html>

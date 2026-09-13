@@ -11,7 +11,20 @@ from PIL import Image, ImageDraw, ImageFont
 
 from . import __version__
 from .app import LOOPBACK_HOSTS, scan_collection, serve
-from .storage import add_collection, collections, data_dir, database_path, remove_collection, review_manifest
+from .storage import (
+    add_collection,
+    collections,
+    complete_collection_review,
+    data_dir,
+    database_path,
+    pending_summary,
+    remove_collection,
+    reopen_collection_review,
+    review_history,
+    review_manifest,
+    root_for,
+    undo_last_review,
+)
 
 
 def create_demo(directory: Path) -> None:
@@ -124,6 +137,31 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--output", default="-", help="Output file or - for stdout")
     export.add_argument("--no-scan", action="store_true")
 
+    pending = sub.add_parser("pending", help="Report collections still waiting for human review")
+    pending.add_argument("--collection")
+    pending.add_argument("--json", action="store_true")
+    pending.add_argument("--no-scan", action="store_true")
+
+    complete = sub.add_parser("complete", help="Mark a collection review complete")
+    complete.add_argument("collection")
+
+    reopen = sub.add_parser("reopen", help="Reopen a completed collection review")
+    reopen.add_argument("collection")
+
+    history = sub.add_parser("history", help="Show review history for one asset")
+    history.add_argument("collection")
+    history.add_argument("rel")
+    history.add_argument("--json", action="store_true")
+    history.add_argument("--limit", type=int, default=50)
+
+    undo = sub.add_parser("undo", help="Undo the most recent review/comment change for one asset")
+    undo.add_argument("collection")
+    undo.add_argument("rel")
+
+    url = sub.add_parser("collection-url", help="Print a stable browser URL for a collection")
+    url.add_argument("collection")
+    url.add_argument("--base-url", default="http://127.0.0.1:8160")
+
     run = sub.add_parser("serve", help="Run the web viewer")
     run.add_argument("--host", default="127.0.0.1")
     run.add_argument("--port", type=int, default=8160)
@@ -171,6 +209,49 @@ def main() -> None:
             else:
                 Path(args.output).expanduser().write_text(payload)
                 print(f"Wrote {args.output}")
+        elif args.command == "pending":
+            if not args.no_scan:
+                scan_registered(args.collection)
+            payload = pending_summary(args.collection)
+            if args.json:
+                print(json.dumps(payload, indent=2, sort_keys=True))
+            else:
+                for state in payload["collections"]:
+                    marker = "PENDING" if state["pending"] else "COMPLETE"
+                    print(f"{marker}\t{state['collection']}\tunreviewed={state['unreviewed']} new={state['new']} completed_at={state['completed_at'] or '-'}")
+            raise SystemExit(2 if payload["pending"] else 0)
+        elif args.command == "complete":
+            if not root_for(args.collection):
+                raise ValueError(f"collection not found: {args.collection}")
+            scan_registered(args.collection)
+            state = complete_collection_review(args.collection)
+            print(f"Completed {args.collection} at {state['completed_at']}")
+        elif args.command == "reopen":
+            if not root_for(args.collection):
+                raise ValueError(f"collection not found: {args.collection}")
+            state = reopen_collection_review(args.collection)
+            print(f"Reopened {args.collection}")
+        elif args.command == "history":
+            if not root_for(args.collection):
+                raise ValueError(f"collection not found: {args.collection}")
+            events = review_history(args.collection, args.rel, args.limit)
+            if args.json:
+                print(json.dumps({"collection": args.collection, "rel": args.rel, "events": events}, indent=2, sort_keys=True))
+            else:
+                for event in events:
+                    undone = " UNDONE" if event["undone_at"] else ""
+                    print(f"{event['id']}\t{event['created_at']}\t{event['action']}\t{event['old_status'] or 'unreviewed'} -> {event['new_status'] or 'unreviewed'}{undone}")
+        elif args.command == "undo":
+            if not root_for(args.collection):
+                raise ValueError(f"collection not found: {args.collection}")
+            result = undo_last_review(args.collection, args.rel)
+            if not result:
+                raise ValueError("no review change to undo")
+            print(f"Restored {args.rel} to {result['status'] or 'unreviewed'}")
+        elif args.command == "collection-url":
+            if not root_for(args.collection):
+                raise ValueError(f"collection not found: {args.collection}")
+            print(args.base_url.rstrip('/') + "/c/" + args.collection)
         elif args.command == "serve":
             serve(args.host, args.port, args.trusted_host, log_level=args.log_level)
         elif args.command == "doctor":

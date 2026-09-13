@@ -34,12 +34,12 @@ Target: make review decisions directly useful to the next agent turn.
 
 - [x] Per-asset comments/notes.
 - [x] JSON review manifest and `asset-viewer reviews --json`.
-- [x] Stable collection URLs in the browser (`/c/<slug>`); CLI URL helper remains open.
+- [x] Stable collection URLs in the browser (`/c/<slug>`) plus `asset-viewer collection-url`.
 - [x] Batch selection and bulk Approve / Maybe / Reject.
 - [x] Side-by-side compare mode for 2–4 assets. Synchronized zoom/pan remains open.
 - [x] New/unseen-since-discovery state.
-- [ ] Review history and undo.
-- [x] Exportable filtered manifests; `asset-viewer pending --json` remains open.
+- [x] Review history and undo for status/comment changes.
+- [x] Exportable filtered manifests plus `asset-viewer pending --json` with explicit completion exit codes.
 
 Example machine-readable feedback:
 
@@ -60,9 +60,9 @@ Planned CLI/API concepts:
 
 ```text
 asset-viewer collection create
-asset-viewer collection url
+asset-viewer collection-url
 asset-viewer reviews --json
-asset-viewer pending --json
+asset-viewer pending --json  # implemented; review sessions/events remain next
 asset-viewer wait-for-review
 asset-viewer export-manifest
 ```
@@ -85,8 +85,8 @@ The intended loop is:
 Target: support high-volume visual iteration without becoming an editor or DAM.
 
 - Zoom/pan and fit modes.
-- Filename and metadata search.
-- Sort/filter by time, status, dimensions, type, and generation metadata.
+- [~] Filename/path search is implemented; metadata search remains open.
+- [~] Sort by time/name/status is implemented; dimensions/type/generation-metadata sorting remains open.
 - Prompt/model/generation metadata display where available.
 - Contact-sheet export.
 - Compare/overlay/difference views.
