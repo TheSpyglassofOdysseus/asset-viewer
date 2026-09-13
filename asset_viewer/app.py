@@ -413,12 +413,9 @@ def _render_preview(path: Path, destination: Path, max_size: tuple[int, int]) ->
     with THUMBNAIL_SEMAPHORE:
         if destination.exists():
             return destination.read_bytes()
-        try:
-            if path.stat().st_size > MAX_THUMBNAIL_SOURCE_BYTES:
-                return _placeholder_preview(path, "Preview skipped: file exceeds configured size limit", placeholder_size, destination)
-        except OSError as exc:
-            LOGGER.warning("preview source unavailable for %s: %s", path, exc)
-            return _placeholder_preview(path, "Preview unavailable: source file cannot be read", placeholder_size, destination)
+        # Source-byte validation belongs inside the disposable decoder worker.
+        # Avoid a second parent-process filesystem touch after safe_file() has
+        # already established collection containment.
         payload = _run_isolated_worker(
             render_preview_worker,
             (str(path), str(destination), max_size, MAX_THUMBNAIL_SOURCE_BYTES, MAX_IMAGE_PIXELS, PREVIEW_WORKER_MEMORY_BYTES),
