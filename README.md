@@ -35,6 +35,7 @@ No import job. No duplicate asset library. No requirement to upload the batch to
 - **Approve / Maybe / Reject** states stored separately from source files.
 - **Review notes/comments plus pinned point/region annotations** attached to the exact asset without modifying it; spatial feedback is content-fingerprinted and becomes stale if the underlying pixels change.
 - **New/unseen tracking** so recurring collections show what changed.
+- **Variant/version families** that group related attempts without moving or renaming originals, with preferred/latest semantics and one-click family comparison.
 - **Batch review plus side-by-side / overlay / difference comparison** with linked or independent zoom/pan for precise variant triage.
 - **Stable collection and asset deep links** for direct handoff to a gallery or exact image.
 - **Machine-readable manifests and ordered event feeds** through the CLI and read-only JSON API.
@@ -104,6 +105,10 @@ asset-viewer history SLUG REL       Show review history for one asset
 asset-viewer undo SLUG REL          Undo the latest review/comment change
 asset-viewer collection-url SLUG    Print the stable collection handoff URL
 asset-viewer asset-url SLUG ASSET   Print a stable deep link to one asset
+asset-viewer families SLUG           List variant/version families
+asset-viewer family-create ...        Group related assets without moving them
+asset-viewer family-add/remove ...    Maintain family membership
+asset-viewer family-prefer ...        Set/clear the preferred family member
 asset-viewer annotations SLUG ASSET List point/region feedback for one asset
 asset-viewer annotate ...            Create precise point/region feedback
 asset-viewer cache [status|prune]   Inspect/prune generated preview cache
@@ -243,7 +248,7 @@ asset-viewer serve --port 8160
 
 The roadmap is organized around a deliberate progression: **production hardening → human/agent feedback → agent-native automation → serious creative review → collaboration**.
 
-The core machine-readable human→agent loop now includes precise point/region feedback and linked comparison controls. The next product frontier is variant/version families, near-real-time filesystem watching, and a first-class MCP adapter while preserving the local-first review-plane boundary.
+The core machine-readable human→agent loop now includes precise point/region feedback, linked comparison controls, and durable variant/version families. The next product frontier is near-real-time filesystem watching, generation/provenance metadata adapters, review-report export, and push/MCP adapters while preserving the local-first review-plane boundary.
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the phased feature/benefit analysis and roadmap.
 

@@ -101,6 +101,20 @@ class CliWorkflowTests(unittest.TestCase):
         deleted = self.run_cli("annotation-delete", "images", annotation["annotation_id"])
         self.assertEqual(deleted.returncode, 0, deleted.stderr)
 
+    def test_variant_family_cli_round_trip(self):
+        from asset_viewer.app import scan_collection
+        scan_collection("images", force=True)
+        created = self.run_cli("family-create", "images", "Concept family", "a.png", "b.png", "--json")
+        self.assertEqual(created.returncode, 0, created.stderr)
+        family = json.loads(created.stdout)
+        self.assertEqual(len(family["members"]), 2)
+        preferred = self.run_cli("family-prefer", "images", family["family_id"], "b.png", "--json")
+        self.assertEqual(preferred.returncode, 0, preferred.stderr)
+        self.assertEqual(json.loads(preferred.stdout)["preferred_asset_id"], next(row["asset_id"] for row in storage.catalog_records("images") if row["rel"] == "b.png"))
+        listed = self.run_cli("families", "images", "--json")
+        self.assertEqual(listed.returncode, 0, listed.stderr)
+        self.assertEqual(json.loads(listed.stdout)["families"][0]["name"], "Concept family")
+
     def test_events_and_wait_for_review_cli(self):
         storage.set_review("images", "a.png", "approved")
         events = self.run_cli("events", "--collection", "images", "--json")

@@ -21,7 +21,7 @@
     <button id="refresh" type="button">Refresh</button>
   </div>
 </header>
-<div id="bulkbar" class="bulkbar hidden"><strong id="selectedCount">0 selected</strong><button data-bulk-status="approved" type="button">✓ Approve</button><button data-bulk-status="maybe" type="button">? Maybe</button><button data-bulk-status="rejected" type="button">× Reject</button><button data-bulk-status="" type="button">Clear review</button><button id="compare" type="button">Compare</button><button id="clearSelection" type="button">Clear selection</button></div>
+<div id="bulkbar" class="bulkbar hidden"><strong id="selectedCount">0 selected</strong><button data-bulk-status="approved" type="button">✓ Approve</button><button data-bulk-status="maybe" type="button">? Maybe</button><button data-bulk-status="rejected" type="button">× Reject</button><button data-bulk-status="" type="button">Clear review</button><button id="groupVariants" type="button">Group variants</button><button id="compare" type="button">Compare</button><button id="clearSelection" type="button">Clear selection</button></div>
 <main><div id="empty" class="empty hidden"><strong>No images in this view.</strong><span>Try another filter/search or register a folder with <code>asset-viewer add /path/to/images</code>.</span></div><div id="grid" class="grid"></div></main>
 
 <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Image review">
@@ -35,6 +35,7 @@
       <div class="identity"><strong id="filename"></strong><span id="details"></span><span id="previewNotice" class="preview-notice hidden"></span></div>
       <div class="review"><button class="approve" data-status="approved" type="button">✓ Approve</button><button class="maybe" data-status="maybe" type="button">? Maybe</button><button class="reject" data-status="rejected" type="button">× Reject</button><button data-status="" type="button">Clear</button><button id="undoReview" type="button">↶ Undo</button><button id="showHistory" type="button">History</button><button id="copyPath" type="button">Copy path</button><button id="copyReviewLink" type="button">Copy review link</button><a id="original" target="_blank" rel="noreferrer">Open original</a></div>
     </div>
+    <div id="familyRow" class="family-row hidden"><div><strong id="familyName"></strong><span id="familyMeta"></span></div><div class="family-actions"><button id="compareFamily" type="button">Compare family</button><button id="setPreferred" type="button">Set preferred</button><button id="leaveFamily" type="button">Leave family</button></div></div>
     <div class="comment-row"><textarea id="comment" maxlength="10000" placeholder="Review note for the next agent…" aria-label="Review note"></textarea><button id="saveComment" type="button">Save note</button></div>
     <div class="annotation-toolbar">
       <input id="annotationText" maxlength="4000" placeholder="Precise feedback, e.g. “move this logo left”…" aria-label="Annotation note">

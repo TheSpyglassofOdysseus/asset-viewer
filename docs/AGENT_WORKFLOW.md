@@ -56,7 +56,19 @@ Or export a stable manifest for another process:
 asset-viewer export-manifest --collection brand-concepts --output review-manifest.json
 ```
 
-The manifest includes status, comments, new/seen timestamps, and update timestamps. This is preferred over asking an agent to infer approval state from chat text.
+The manifest includes status, comments, new/seen timestamps, update timestamps, and variant-family metadata when related attempts have been grouped. This is preferred over asking an agent to infer approval state from chat text.
+
+## Variant families
+
+Generative work often arrives as related attempts rather than unrelated files. Group those attempts in Asset Viewer without renaming or moving the originals:
+
+```bash
+asset-viewer family-create brand-concepts "Logo exploration" concept-v1.png concept-v2.png concept-v3.png --json
+asset-viewer family-prefer brand-concepts <family-id> concept-v3.png --json
+asset-viewer families brand-concepts --json
+```
+
+Family membership follows stable asset IDs across ordinary same-filesystem renames. Family create/add/remove/prefer/rename/delete actions also appear in the ordered event feed, so an agent can react to lineage and preference changes as structured feedback.
 
 ## Waiting for explicit human completion
 

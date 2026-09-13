@@ -2,6 +2,19 @@
 
 All notable changes to Asset Viewer will be documented here.
 
+## 0.6.0 — 2026-09-13
+
+Variant-family release.
+
+- Add durable variant/version families keyed by stable asset UUIDs, without moving, renaming, copying, or modifying source files.
+- Add explicit preferred-member state plus computed latest-member state for each family.
+- Preserve family membership across same-filesystem renames because membership follows stable asset identity rather than relative paths.
+- Add family metadata to gallery rows, review manifests, the versioned JSON schema, `/api/families`, and ordered event feeds.
+- Add CSRF-protected family create/add/remove/prefer/rename/delete mutations to both production WSGI and development HTTP paths.
+- Add CLI commands for family creation, inspection, membership changes, preferred-member selection, rename, and metadata-only deletion.
+- Add gallery controls to group selected variants, extend an existing family, mark a preferred member, leave a family, and compare family members directly.
+- Add regression coverage for rename survival, exclusive membership, source-file non-destruction, agent events, CLI flow, and production WSGI APIs.
+
 ## 0.5.0 — 2026-09-13
 
 Precision-review and production-runtime release.
