@@ -229,16 +229,19 @@ def safe_file(slug: str, relative: str) -> Path | None:
     if not root:
         return None
     try:
-        # SECURITY: `relative` may originate from an HTTP path. Resolve it first,
-        # then enforce containment inside the registered root before any file is
-        # opened or stat'ed. This also rejects symlinks that escape the root.
-        path = (root / relative).resolve()  # lgtm[py/path-injection]
-        if path == root or root not in path.parents or not path.is_file():  # lgtm[py/path-injection]
+        # SECURITY: reject absolute/traversal components before joining, then
+        # resolve and enforce containment. Symlinks that escape the root fail
+        # the post-resolution parent check.
+        relative_path = Path(relative)
+        if relative_path.is_absolute() or any(part in {"", ".", ".."} for part in relative_path.parts):
             return None
-        if path.suffix.lower() not in IMAGE_EXTS:
+        if relative_path.suffix.lower() not in IMAGE_EXTS:
+            return None
+        path = (root / relative_path).resolve()
+        if path == root or root not in path.parents or not path.is_file():
             return None
         return path
-    except OSError:
+    except (OSError, ValueError):
         return None
 
 

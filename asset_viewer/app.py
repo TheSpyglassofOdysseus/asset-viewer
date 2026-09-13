@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import hmac
 import json
 import logging
@@ -185,7 +186,7 @@ def make_thumbnail(path: Path) -> bytes:
     if destination.exists():
         return destination.read_bytes()
     # `path` is supplied only after `safe_file()` containment validation.
-    if path.stat().st_size > MAX_THUMBNAIL_SOURCE_BYTES:  # lgtm[py/path-injection]
+    if path.stat().st_size > MAX_THUMBNAIL_SOURCE_BYTES:
         return _placeholder_thumbnail(path, "Preview skipped: file exceeds configured size limit")
     try:
         with warnings.catch_warnings():
@@ -233,7 +234,7 @@ class AssetViewerHandler(BaseHTTPRequestHandler):
                 username, supplied = decoded.split(":", 1)
                 if hmac.compare_digest(username, "asset-viewer") and hmac.compare_digest(supplied, password):
                     return True
-            except (ValueError, UnicodeDecodeError):
+            except (ValueError, UnicodeDecodeError, binascii.Error):
                 pass
         self._send(401, "text/plain; charset=utf-8", "Authentication required", {"WWW-Authenticate": 'Basic realm="Asset Viewer", charset="UTF-8"'})
         return False
@@ -290,7 +291,7 @@ class AssetViewerHandler(BaseHTTPRequestHandler):
         self.end_headers()
         try:
             # Callers pass packaged static files or a `safe_file()`-validated asset.
-            with path.open("rb") as handle:  # lgtm[py/path-injection]
+            with path.open("rb") as handle:
                 shutil.copyfileobj(handle, self.wfile, length=1024 * 1024)
         except (BrokenPipeError, ConnectionResetError):
             pass
