@@ -184,7 +184,8 @@ def make_thumbnail(path: Path) -> bytes:
     destination = thumb_path(path)
     if destination.exists():
         return destination.read_bytes()
-    if path.stat().st_size > MAX_THUMBNAIL_SOURCE_BYTES:
+    # `path` is supplied only after `safe_file()` containment validation.
+    if path.stat().st_size > MAX_THUMBNAIL_SOURCE_BYTES:  # lgtm[py/path-injection]
         return _placeholder_thumbnail(path, "Preview skipped: file exceeds configured size limit")
     try:
         with warnings.catch_warnings():
@@ -288,7 +289,8 @@ class AssetViewerHandler(BaseHTTPRequestHandler):
             self.send_header(key, value)
         self.end_headers()
         try:
-            with path.open("rb") as handle:
+            # Callers pass packaged static files or a `safe_file()`-validated asset.
+            with path.open("rb") as handle:  # lgtm[py/path-injection]
                 shutil.copyfileobj(handle, self.wfile, length=1024 * 1024)
         except (BrokenPipeError, ConnectionResetError):
             pass

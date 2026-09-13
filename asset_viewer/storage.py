@@ -229,8 +229,11 @@ def safe_file(slug: str, relative: str) -> Path | None:
     if not root:
         return None
     try:
-        path = (root / relative).resolve()
-        if path == root or root not in path.parents or not path.is_file():
+        # SECURITY: `relative` may originate from an HTTP path. Resolve it first,
+        # then enforce containment inside the registered root before any file is
+        # opened or stat'ed. This also rejects symlinks that escape the root.
+        path = (root / relative).resolve()  # lgtm[py/path-injection]
+        if path == root or root not in path.parents or not path.is_file():  # lgtm[py/path-injection]
             return None
         if path.suffix.lower() not in IMAGE_EXTS:
             return None
