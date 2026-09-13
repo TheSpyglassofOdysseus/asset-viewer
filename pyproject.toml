@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "local-asset-viewer"
+version = "0.1.0"
+description = "Local-first visual review gallery for AI-generated and project image folders."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "TheSpyglassofOdysseus"}]
+keywords = ["image-review", "asset-management", "ai-agents", "gallery", "local-first", "creative-workflow"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Web Environment",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Multimedia :: Graphics :: Viewers",
+]
+dependencies = ["Pillow>=10.0"]
+
+[project.scripts]
+asset-viewer = "asset_viewer.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/TheSpyglassofOdysseus/asset-viewer"
+Repository = "https://github.com/TheSpyglassofOdysseus/asset-viewer"
+Issues = "https://github.com/TheSpyglassofOdysseus/asset-viewer/issues"
+
+[tool.setuptools.package-data]
+asset_viewer = ["static/*"]

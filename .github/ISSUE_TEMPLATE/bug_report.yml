@@ -1,0 +1,17 @@
+name: Bug report
+description: Report reproducible Asset Viewer behavior
+body:
+  - type: textarea
+    attributes:
+      label: What happened?
+      description: Include the command, expected behavior, and actual behavior.
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Asset Viewer version
+      placeholder: "0.1.0"
+  - type: input
+    attributes:
+      label: Python version and OS
+      placeholder: "Python 3.12 / Ubuntu 24.04"

@@ -1,0 +1,12 @@
+name: Feature request
+description: Propose a focused improvement to the review workflow
+body:
+  - type: textarea
+    attributes:
+      label: Problem to solve
+      description: What review workflow is difficult today?
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Proposed behavior
