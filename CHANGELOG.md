@@ -2,6 +2,15 @@
 
 All notable changes to Asset Viewer will be documented here.
 
+## 0.6.1 — 2026-09-13
+
+Public-release sign-off patch.
+
+- Make setuptools package-data intent explicit so source and wheel builds are warning-free while continuing to ship the static web UI.
+- Add a final public-release audit/sign-off covering package integrity, privacy, security controls, protocol validation, deployment boundaries, and residual risks.
+- Normalize family-member `present` values to JSON booleans so generated review manifests conform exactly to the shipped schema.
+- No source-file ownership or destructive-file semantics changed from v0.6.0.
+
 ## 0.6.0 — 2026-09-13
 
 Variant-family release.

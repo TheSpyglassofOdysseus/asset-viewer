@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "local-asset-viewer"
-version = "0.6.0"
+version = "0.6.1"
 description = "Local-first visual review gallery for AI-generated and project image folders."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -33,6 +33,7 @@ Issues = "https://github.com/TheSpyglassofOdysseus/asset-viewer/issues"
 
 [tool.setuptools]
 packages = ["asset_viewer"]
+include-package-data = false
 
 [tool.setuptools.package-data]
 asset_viewer = ["static/*"]
