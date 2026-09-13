@@ -19,7 +19,7 @@ Asset Viewer is the **review plane**, not the storage plane. Projects and creati
 Target: make private/server deployments robust enough to recommend confidently.
 
 - Replace or wrap the development `http.server` listener with a production serving layer.
-- [x] Review/comment/seen state and the asset catalog are transactional SQLite with migrations and stable UUID asset IDs.
+- [x] Review/comment/seen state and the asset catalog are transactional SQLite with migrations, stable UUID asset IDs, and SHA-256-bound non-empty review decisions.
 - [~] Durable catalog + cached reads, tombstones, content-change invalidation, and rename reconciliation are implemented; a filesystem watcher remains open for immediate discovery without explicit/TTL rescans.
 - [~] Image byte/pixel/scan limits and bounded concurrent decoding are implemented; process-isolated preview workers remain open.
 - [x] SVG previews are inert JPEG placeholders and originals are forced downloads.

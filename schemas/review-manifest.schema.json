@@ -3,49 +3,171 @@
   "$id": "https://github.com/TheSpyglassofOdysseus/asset-viewer/schemas/review-manifest.schema.json",
   "title": "Asset Viewer review manifest",
   "type": "object",
-  "required": ["version", "generated_at", "counts", "items"],
+  "required": [
+    "version",
+    "generated_at",
+    "counts",
+    "items"
+  ],
   "properties": {
-    "version": {"const": 1},
-    "generated_at": {"type": "string", "format": "date-time"},
+    "version": {
+      "const": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
     "counts": {
       "type": "object",
-      "required": ["total", "present", "missing", "approved", "maybe", "rejected", "unreviewed", "new"],
+      "required": [
+        "total",
+        "present",
+        "missing",
+        "approved",
+        "maybe",
+        "rejected",
+        "unreviewed",
+        "new"
+      ],
       "additionalProperties": false,
       "properties": {
-        "total": {"type": "integer", "minimum": 0},
-        "present": {"type": "integer", "minimum": 0},
-        "missing": {"type": "integer", "minimum": 0},
-        "approved": {"type": "integer", "minimum": 0},
-        "maybe": {"type": "integer", "minimum": 0},
-        "rejected": {"type": "integer", "minimum": 0},
-        "unreviewed": {"type": "integer", "minimum": 0},
-        "new": {"type": "integer", "minimum": 0}
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "present": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "missing": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "approved": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maybe": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rejected": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unreviewed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "new": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "items": {
       "type": "array",
-      "items": {"$ref": "#/$defs/reviewItem"}
+      "items": {
+        "$ref": "#/$defs/reviewItem"
+      }
     }
   },
   "$defs": {
     "reviewItem": {
       "type": "object",
-      "required": ["asset_id", "collection", "collection_label", "rel", "status", "comment", "present"],
+      "required": [
+        "asset_id",
+        "collection",
+        "collection_label",
+        "rel",
+        "status",
+        "comment",
+        "present"
+      ],
       "properties": {
-        "asset_id": {"type": "string", "format": "uuid"},
-        "collection": {"type": "string"},
-        "collection_label": {"type": "string"},
-        "rel": {"type": "string"},
-        "status": {"enum": ["", "approved", "maybe", "rejected"]},
-        "comment": {"type": "string"},
-        "first_seen_at": {"type": ["string", "null"], "format": "date-time"},
-        "seen_at": {"type": ["string", "null"], "format": "date-time"},
-        "updated_at": {"type": ["string", "null"], "format": "date-time"},
-        "present": {"type": "boolean"},
-        "size": {"type": ["integer", "null"], "minimum": 0},
-        "mtime_ns": {"type": ["integer", "null"], "minimum": 0},
-        "width": {"type": ["integer", "null"], "minimum": 0},
-        "height": {"type": ["integer", "null"], "minimum": 0}
+        "asset_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "collection": {
+          "type": "string"
+        },
+        "collection_label": {
+          "type": "string"
+        },
+        "rel": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "",
+            "approved",
+            "maybe",
+            "rejected"
+          ]
+        },
+        "comment": {
+          "type": "string"
+        },
+        "first_seen_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "seen_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "present": {
+          "type": "boolean"
+        },
+        "size": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "mtime_ns": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "width": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "height": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "review_sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        }
       },
       "additionalProperties": true
     }

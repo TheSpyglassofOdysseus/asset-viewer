@@ -9,6 +9,7 @@ Durable catalog and agent-event release.
 - Add stable UUID asset identities that survive same-filesystem renames.
 - Add a durable SQLite asset catalog with scan generations, present/missing tombstones, dimensions, file identity, and change metadata.
 - Preserve review status, comments, and history across renames; invalidate stale approvals when file content changes.
+- Bind non-empty review decisions to a streaming SHA-256 fingerprint of the reviewed bytes; forced reconciliation detects same-size/same-timestamp replacements and completion re-verifies fingerprints.
 - Keep deleted assets in manifests as missing/tombstoned records so automation can account for reviewed work that disappeared.
 - Add cached gallery reads with bounded explicit rescans instead of recursive filesystem discovery on every page refresh.
 - Prevent truncated scans from incorrectly tombstoning unvisited files or allowing a collection to be marked review-complete.

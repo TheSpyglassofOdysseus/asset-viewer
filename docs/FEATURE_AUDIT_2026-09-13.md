@@ -94,7 +94,7 @@ Sources:
 | Stable collection URL | Strong | Predictable human handoff |
 | Stable asset deep link | Added in v0.4 | A specific asset can be referenced without filename fragility |
 | Stable asset identity | Added in v0.4 | Rename-safe decisions/history |
-| Content-change invalidation | Added in v0.4 | Old approval cannot silently bless replacement bytes |
+| Content-change invalidation + SHA-256 review fingerprint | Added in v0.4 | Old approval cannot silently bless replacement bytes, including same-size/same-timestamp replacements |
 | Deleted-asset tombstones | Added in v0.4 | Automation can distinguish deletion from omission |
 | Explicit review completion | Strong | Human controls the workflow gate |
 | Ordered event feed | Added in v0.4 | Agents can incrementally consume decisions |
@@ -120,7 +120,7 @@ The primary benefit is **structured judgment instead of conversational inference
 
 ### For project integrity
 
-The project owns the bytes; Asset Viewer owns review metadata. v0.4 extends that separation with tombstones and content-change invalidation so review history remains useful even when the filesystem evolves.
+The project owns the bytes; Asset Viewer owns review metadata. v0.4 extends that separation with tombstones, stable identity, and SHA-256-bound decisions so review history remains useful even when the filesystem evolves and stale approval cannot silently follow replacement bytes.
 
 ### For self-hosted/server workflows
 

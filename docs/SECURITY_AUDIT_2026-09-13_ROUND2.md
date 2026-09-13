@@ -24,7 +24,7 @@ Relevant attackers/failure modes include malicious browser origins, hostile file
 
 | ID | Severity | Finding | v0.4 disposition |
 |---|---|---|---|
-| R2-001 | High integrity | Replacing the bytes of an already-approved file at the same path could retain the old approval. | **Fixed.** Catalog metadata changes invalidate status/comment, mark the asset new, record a `content_changed` event, and prevent undo from resurrecting pre-change approval. |
+| R2-001 | High integrity | Replacing the bytes of an already-approved file at the same path could retain the old approval. | **Fixed.** Non-empty decisions are bound to a streaming SHA-256 fingerprint of the reviewed bytes. Catalog metadata changes or a fingerprint mismatch invalidate status/comment, mark the asset new, record a `content_changed` event, and prevent undo from resurrecting pre-change approval. A regression test covers same-size replacements with nanosecond mtime restored. |
 | R2-002 | High integrity | A truncated filesystem scan could leave automation with an incomplete view yet still permit review completion. | **Fixed.** Truncated/unavailable scans are explicit catalog state and `complete` is rejected until a complete scan succeeds. |
 | R2-003 | Medium | Scanner discovery could encounter a symlinked image resolving outside the registered root. File-serving containment already blocked access, but metadata scanning should enforce the same boundary. | **Fixed.** Discovery uses non-following directory traversal, resolves each candidate strictly, enforces root containment, and decodes/stats only the resolved in-root file. |
 | R2-004 | Medium integrity | Review identity followed collection + relative path; renames could orphan decisions/history. | **Fixed.** Stable UUID asset IDs plus same-filesystem device/inode reconciliation preserve state across unambiguous renames. |
@@ -49,7 +49,7 @@ Relevant attackers/failure modes include malicious browser origins, hostile file
 - Preview concurrency is bounded.
 - Review/catalog data is transactional SQLite with private filesystem permissions.
 - Scan truncation and unavailable mounts are fail-closed for completion semantics.
-- Approval is invalidated when cataloged content changes.
+- Non-empty decisions store a SHA-256 fingerprint; approval is invalidated on metadata changes or reviewed-byte fingerprint mismatch.
 - Deleted assets remain visible to machine-readable manifests as tombstones.
 - Review events have stable asset IDs and bounded pagination.
 

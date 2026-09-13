@@ -34,7 +34,7 @@ No import job. No duplicate asset library. No requirement to upload the batch to
 - **Machine-readable manifests and ordered event feeds** through the CLI and read-only JSON API.
 - **Explicit review completion** with automation-friendly pending state.
 - **Review history and undo** for status/comment decisions.
-- **Stable asset IDs and durable cataloging** so review state survives renames and safely notices replacements/deletions.
+- **Stable asset IDs, SHA-256 review fingerprints, and durable cataloging** so review state survives renames while replacements/deletions invalidate stale completion safely.
 - **Filename/path search and sorting** for growing collections.
 - **Keyboard review**: arrow keys to navigate; `A`, `M`, `R` to classify.
 - **Multiple collections** behind one viewer URL.

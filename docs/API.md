@@ -104,6 +104,6 @@ The generated asset link uses the stable UUID, so ordinary same-filesystem renam
 
 - Source files remain authoritative and are never rewritten by Asset Viewer.
 - Review state follows stable asset identity across detected same-filesystem renames.
-- Replacing the bytes at an existing path invalidates the previous status/comment and makes the asset new again.
+- Non-empty review decisions are bound to a SHA-256 fingerprint (`review_sha256`) of the reviewed bytes. Replacing the bytes at an existing path invalidates the previous status/comment and makes the asset new again—even when size and nanosecond mtime are preserved and the replacement is detected by fingerprint reconciliation.
 - Deleted assets are tombstoned rather than silently removed from manifests.
 - Truncated/incomplete scans cannot declare missing files or produce a completed review state.

@@ -29,6 +29,7 @@ from .storage import (
     collection_review_state,
     collections,
     complete_collection_review,
+    file_sha256,
     mark_seen,
     pending_summary,
     reconcile_catalog,
@@ -77,6 +78,7 @@ def capability_document() -> dict[str, Any]:
         "review_statuses": ["approved", "maybe", "rejected"],
         "features": {
             "stable_asset_ids": True,
+            "review_fingerprints": True,
             "catalog": True,
             "review_comments": True,
             "review_history": True,
@@ -242,10 +244,13 @@ def scan_collection(slug: str, force: bool = False) -> tuple[list[dict[str, Any]
                     rel = path.relative_to(root).as_posix()
                     stat = resolved.stat()
                     prior = by_rel.get(rel) or by_identity.get((int(stat.st_dev), int(stat.st_ino)))
+                    review_hash_mismatch = False
                     if prior and prior.get("size") == stat.st_size and prior.get("mtime_ns") == stat.st_mtime_ns:
                         width = prior.get("width") or 0
                         height = prior.get("height") or 0
                         preview_error = prior.get("preview_error")
+                        if prior.get("status") and prior.get("review_sha256"):
+                            review_hash_mismatch = file_sha256(resolved) != prior.get("review_sha256")
                     else:
                         width, height, preview_error = _safe_dimension(resolved)
                     discoveries.append({
@@ -257,6 +262,7 @@ def scan_collection(slug: str, force: bool = False) -> tuple[list[dict[str, Any]
                         "width": int(width or 0),
                         "height": int(height or 0),
                         "preview_error": preview_error,
+                        "review_hash_mismatch": review_hash_mismatch,
                     })
                 except OSError as exc:
                     LOGGER.warning("skipping unreadable asset %s: %s", path, exc)

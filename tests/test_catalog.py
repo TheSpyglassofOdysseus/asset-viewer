@@ -110,6 +110,28 @@ class CatalogTests(unittest.TestCase):
         self.assertIsNone(undone)
         self.assertEqual(storage.review_manifest("images")["items"][0]["status"], "")
 
+    def test_review_fingerprint_detects_same_size_same_mtime_replacement(self):
+        path = self.images / "fingerprint.bmp"
+        Image.new("RGB", (64, 48), (10, 20, 30)).save(path)
+        scan_collection("images", force=True)
+        storage.set_review("images", "fingerprint.bmp", "approved")
+        before = path.stat()
+        manifest = storage.review_manifest("images")
+        self.assertRegex(manifest["items"][0]["review_sha256"], r"^[0-9a-f]{64}$")
+
+        Image.new("RGB", (64, 48), (90, 80, 70)).save(path)
+        after_write = path.stat()
+        self.assertEqual(before.st_size, after_write.st_size)
+        os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+        self.assertEqual(path.stat().st_mtime_ns, before.st_mtime_ns)
+
+        rows, meta = scan_collection("images", force=True)
+        self.assertEqual(meta["changed"], 1)
+        self.assertEqual(rows[0]["status"], "")
+        self.assertIsNone(storage.review_manifest("images")["items"][0]["review_sha256"])
+        event = next(e for e in storage.review_events_since("images")["events"] if e["action"] == "content_changed")
+        self.assertTrue(event["details"]["review_hash_mismatch"])
+
     def test_completed_review_becomes_stale_when_asset_is_deleted(self):
         path = self.make_image("approved.png")
         scan_collection("images", force=True)

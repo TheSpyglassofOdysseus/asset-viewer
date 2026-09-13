@@ -73,7 +73,7 @@ Implemented substantially: `reviews`, `pending`, `events`, `wait-for-review`, ma
 
 ### Stable asset identity
 
-Implemented in v0.4: each cataloged asset has a stable UUID. Same-filesystem renames preserve review state/history; content replacement invalidates stale approval and re-enters review.
+Implemented in v0.4: each cataloged asset has a stable UUID. Same-filesystem renames preserve review state/history; non-empty decisions are SHA-256-bound to reviewed bytes, so content replacement invalidates stale approval and re-enters review.
 
 **Why necessary:** review decisions must survive ordinary workflow changes.
 

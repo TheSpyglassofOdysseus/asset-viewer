@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -517,7 +518,9 @@ def reconcile_catalog(
             used_ids.add(asset_id)
             was_present = bool(target["present"])
             metadata_known = target["size"] is not None and target["mtime_ns"] is not None
-            content_changed = metadata_known and (int(target["size"]) != size or int(target["mtime_ns"]) != mtime_ns)
+            content_changed = (
+                metadata_known and (int(target["size"]) != size or int(target["mtime_ns"]) != mtime_ns)
+            ) or bool(item.get("review_hash_mismatch"))
             if not was_present:
                 _record_system_event(conn, collection, rel, asset_id, "asset_restored", now)
                 restored += 1
@@ -533,7 +536,8 @@ def reconcile_catalog(
                 )
                 _record_system_event(
                     conn, collection, rel, asset_id, "content_changed", now,
-                    {"old_size": target["size"], "new_size": size, "old_mtime_ns": target["mtime_ns"], "new_mtime_ns": mtime_ns},
+                    {"old_size": target["size"], "new_size": size, "old_mtime_ns": target["mtime_ns"], "new_mtime_ns": mtime_ns,
+                     "review_hash_mismatch": bool(item.get("review_hash_mismatch"))},
                     old_status=old_status, new_status="", old_comment=old_comment, new_comment="",
                 )
                 changed += 1
@@ -604,7 +608,6 @@ def review_records(collection: str | None = None) -> dict[str, dict[str, dict[st
                 "review_sha256": row["review_sha256"],
                 "content_changed_at": row["content_changed_at"],
                 "missing_at": row["missing_at"],
-                "review_sha256": row["review_sha256"],
             }
     return out
 
@@ -953,7 +956,6 @@ def collection_review_state(collection: str) -> dict[str, Any]:
     }
 
 def complete_collection_review(collection: str) -> dict[str, Any]:
-    verify_review_fingerprints(collection, bind_missing=True)
     state = collection_review_state(collection)
     if state["scan_incomplete"]:
         raise ValueError(f"latest collection scan is incomplete ({state['scan_reason'] or 'unknown reason'})")
@@ -961,6 +963,10 @@ def complete_collection_review(collection: str) -> dict[str, Any]:
         raise ValueError("collection has no present assets to review")
     if state["unreviewed"]:
         raise ValueError(f"collection has {state['unreviewed']} unreviewed asset(s)")
+    verify_review_fingerprints(collection, bind_missing=True)
+    state = collection_review_state(collection)
+    if state["unreviewed"]:
+        raise ValueError(f"collection changed after review; {state['unreviewed']} asset(s) require re-review")
     now = utc_now()
     with _connection() as conn:
         conn.execute(
@@ -1044,6 +1050,9 @@ def review_manifest(collection: str | None = None, status: str | None = None, in
                 "mtime_ns": row["mtime_ns"],
                 "width": row["width"],
                 "height": row["height"],
+                "review_sha256": row["review_sha256"],
+                "content_changed_at": row["content_changed_at"],
+                "missing_at": row["missing_at"],
             })
     counts = {"total": len(items), "present": 0, "missing": 0, "approved": 0, "maybe": 0, "rejected": 0, "unreviewed": 0, "new": 0}
     for item in items:
