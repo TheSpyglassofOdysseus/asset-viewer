@@ -196,7 +196,7 @@ ASSET_VIEWER_PASSWORD='use-a-secret-manager' asset-viewer serve --host 127.0.0.1
 
 `asset-viewer serve` now uses Waitress as its production serving layer. Direct non-loopback binds require both a trusted Host configuration and built-in authentication by default. `--allow-unauthenticated-remote` is an explicit escape hatch only for deployments where a trusted private/authenticated boundary already provides access control. Keep TLS and any broader identity/SSO policy at a trusted reverse proxy or private-network boundary.
 
-See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), [SECURITY.md](SECURITY.md), the [initial security audit](docs/SECURITY_AUDIT_2026-09-13.md), and the [round-2 review-integrity audit](docs/SECURITY_AUDIT_2026-09-13_ROUND2.md). The [feature audit](docs/FEATURE_AUDIT_2026-09-13.md) records the competitive/product analysis behind the roadmap.
+See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), [SECURITY.md](SECURITY.md), the security-audit series, and the [final public-release sign-off](docs/PUBLIC_RELEASE_SIGNOFF_2026-09-13.md). The feature audits record the competitive/product analysis behind the roadmap.
 
 ## Project philosophy
 
@@ -237,12 +237,10 @@ asset-viewer serve --port 8160
 - [Initial security audit](docs/SECURITY_AUDIT_2026-09-13.md)
 - [Round-two security audit](docs/SECURITY_AUDIT_2026-09-13_ROUND2.md)
 - [Round-three production/precision-review security audit](docs/SECURITY_AUDIT_2026-09-13_ROUND3.md)
+- [Final public-release sign-off](docs/PUBLIC_RELEASE_SIGNOFF_2026-09-13.md)
+- [Round-two feature audit](docs/FEATURE_AUDIT_2026-09-13_ROUND2.md)
 - [Deployment guide](docs/DEPLOYMENT.md)
 - [Product roadmap](docs/ROADMAP.md)
-- [Round-2 security audit](docs/SECURITY_AUDIT_2026-09-13_ROUND2.md)
-- [Competitive feature audit](docs/FEATURE_AUDIT_2026-09-13.md)
-- [Round-3 security audit](docs/SECURITY_AUDIT_2026-09-13_ROUND3.md)
-- [Round-2 feature audit](docs/FEATURE_AUDIT_2026-09-13_ROUND2.md)
 
 ## Roadmap
 

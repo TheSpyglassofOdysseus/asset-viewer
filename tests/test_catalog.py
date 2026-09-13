@@ -330,6 +330,7 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(item["family"]["family_id"], family["family_id"])
         self.assertTrue(item["family"]["preferred"])
         self.assertEqual(manifest["families"][0]["name"], "Launch concept")
+        self.assertTrue(all(isinstance(member["present"], bool) for member in manifest["families"][0]["members"]))
 
     def test_family_membership_is_exclusive_and_source_files_are_untouched(self):
         self.make_image("a.png")

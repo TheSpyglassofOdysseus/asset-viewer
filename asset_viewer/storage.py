@@ -501,7 +501,7 @@ def _family_member_rows(conn: sqlite3.Connection, family_id: str) -> list[dict[s
         """,
         (family_id,),
     ).fetchall()
-    return [dict(row) for row in rows]
+    return [dict(row) | {"present": bool(row["present"])} for row in rows]
 
 
 def _family_payload(conn: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
