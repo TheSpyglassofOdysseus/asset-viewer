@@ -61,6 +61,23 @@ class HttpSecurityTests(unittest.TestCase):
     def same_origin(self):
         return f"http://127.0.0.1:{self.port}"
 
+    def test_encoded_traversal_is_rejected(self):
+        outside = Path(self.tmp.name) / "outside.png"
+        Image.new("RGB", (12, 12), (9, 9, 9)).save(outside)
+        status, _, _ = self.request("GET", "/asset/file/samples/%2e%2e/outside.png")
+        self.assertEqual(status, 404)
+
+    def test_malformed_image_gets_inert_preview_instead_of_crashing(self):
+        bad = self.images / "broken.png"
+        bad.write_bytes(b"not really a png")
+        self.request("GET", "/api/gallery?collection=samples&refresh=1")
+        status, headers, body = self.request("GET", "/asset/preview/samples/broken.png")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers.get("Content-Type"), "image/jpeg")
+        import io
+        with Image.open(io.BytesIO(body)) as preview:
+            self.assertEqual(preview.format, "JPEG")
+
     def test_non_image_cannot_be_fetched_by_guessed_url(self):
         status, _, body = self.request("GET", "/asset/file/samples/.env")
         self.assertEqual(status, 404)
@@ -85,6 +102,14 @@ class HttpSecurityTests(unittest.TestCase):
         payload = json.dumps({"collection": "samples", "rel": "sample.png", "status": "approved"})
         status, _, _ = self.request("POST", "/api/review", origin=self.same_origin(), body=payload)
         self.assertEqual(status, 403)
+
+    def test_review_rejects_oversized_request(self):
+        origin = f"http://127.0.0.1:{self.port}"
+        oversized = b"{" + (b" " * (256 * 1024 + 1)) + b"}"
+        status, _, _ = self.request(
+            "POST", "/api/review", origin=origin, body=oversized, csrf="test-csrf-token"
+        )
+        self.assertEqual(status, 400)
 
     def test_review_rejects_wrong_content_type(self):
         payload = json.dumps({"collection": "samples", "rel": "sample.png", "status": "approved"})
@@ -147,6 +172,13 @@ class HttpSecurityTests(unittest.TestCase):
         self.assertNotIn(b"<script>", body)
         self.assertTrue(body.startswith(b"\xff\xd8"))
 
+    def test_capabilities_endpoint(self):
+        status, _, body = self.request("GET", "/api/capabilities")
+        self.assertEqual(status, 200)
+        payload = json.loads(body)
+        self.assertEqual(payload["protocol_version"], 1)
+        self.assertTrue(payload["features"]["asset_deep_links"])
+
     def test_gallery_includes_collection_review_state(self):
         status, _, body = self.request("GET", "/api/gallery?collection=samples")
         self.assertEqual(status, 200)
@@ -190,6 +222,37 @@ class HttpSecurityTests(unittest.TestCase):
         result = json.loads(body)["result"]
         self.assertEqual(result["status"], "maybe")
         self.assertEqual(result["comment"], "first")
+
+    def test_review_can_target_stable_asset_id_and_events_are_readable(self):
+        status, _, body = self.request("GET", "/api/gallery?collection=samples&refresh=1")
+        self.assertEqual(status, 200)
+        gallery = json.loads(body)
+        sample = next(item for item in gallery["images"] if item["rel"] == "sample.png")
+        payload = json.dumps({"collection": "samples", "asset_id": sample["asset_id"], "status": "approved", "comment": "stable"})
+        status, _, _ = self.request("POST", "/api/review", origin=self.same_origin(), body=payload, csrf="test-csrf-token")
+        self.assertEqual(status, 200)
+        status, _, body = self.request("GET", "/api/events?collection=samples&after=0")
+        self.assertEqual(status, 200)
+        events = json.loads(body)["events"]
+        self.assertTrue(any(event["asset_id"] == sample["asset_id"] and event["action"] == "review" for event in events))
+
+    def test_review_preview_is_bounded_and_private(self):
+        large = self.images / "large.png"
+        Image.new("RGB", (3000, 2200), (4, 5, 6)).save(large)
+        self.request("GET", "/api/gallery?collection=samples&refresh=1")
+        status, headers, body = self.request("GET", "/asset/preview/samples/large.png")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers.get("Content-Type"), "image/jpeg")
+        self.assertEqual(headers.get("Cache-Control"), "private, max-age=86400")
+        import io
+        with Image.open(io.BytesIO(body)) as preview:
+            self.assertLessEqual(max(preview.size), 2048)
+
+    def test_thumbnail_response_is_private_cache(self):
+        self.request("GET", "/api/gallery?collection=samples&refresh=1")
+        status, headers, _ = self.request("GET", "/asset/thumb/samples/sample.png")
+        self.assertEqual(status, 200)
+        self.assertTrue(headers.get("Cache-Control", "").startswith("private"))
 
     def test_security_headers_present(self):
         status, headers, _ = self.request("GET", "/")

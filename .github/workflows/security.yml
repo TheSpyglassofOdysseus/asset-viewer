@@ -21,4 +21,10 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: pip install -e . bandit pip-audit
       - run: bandit -r asset_viewer
-      - run: pip-audit --skip-editable
+      - run: pip-audit -r requirements-release.txt
+      - run: pip-audit -r requirements-release.txt -f cyclonedx-json -o asset-viewer-sbom.cdx.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: asset-viewer-sbom-${{ github.sha }}
+          path: asset-viewer-sbom.cdx.json
+          if-no-files-found: error

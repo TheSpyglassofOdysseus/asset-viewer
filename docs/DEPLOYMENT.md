@@ -22,6 +22,27 @@ ASSET_VIEWER_PASSWORD="use-a-secret-manager" asset-viewer serve --host 127.0.0.1
 
 A reverse proxy can then terminate TLS and provide authentication or VPN-only access. `--trusted-host` is required for the browser-facing hostname so the local listener can reject unexpected Host headers. Repeat the option if more than one hostname is legitimate.
 
+## Direct non-loopback binding
+
+A direct bind such as `--host 0.0.0.0` is intentionally harder to enable. It requires at least one `--trusted-host` **and** built-in Basic authentication through `ASSET_VIEWER_PASSWORD`. If another private/authenticated boundary already provides access control, `--allow-unauthenticated-remote` can explicitly acknowledge that design.
+
+The built-in Python HTTP server remains a local/private serving layer, not an internet-facing production application server. Prefer loopback + a hardened reverse proxy.
+
+## Resource limits
+
+Large or hostile images can consume CPU/RAM during metadata extraction and preview generation. Asset Viewer provides configurable bounds:
+
+```text
+ASSET_VIEWER_MAX_SCAN_FILES=50000
+ASSET_VIEWER_MAX_SCAN_SECONDS=10
+ASSET_VIEWER_MAX_THUMBNAIL_BYTES=262144000
+ASSET_VIEWER_MAX_IMAGE_PIXELS=50000000
+ASSET_VIEWER_THUMBNAIL_WORKERS=2
+ASSET_VIEWER_SCAN_TTL_SECONDS=60
+```
+
+`asset-viewer doctor` reports the effective deployment posture, unavailable collection paths, catalog scan state, and these resource-limit settings.
+
 ## systemd example
 
 ```ini

@@ -52,6 +52,10 @@ class AppTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             serve("0.0.0.0", 0, [])
 
+    def test_non_loopback_bind_requires_auth_or_explicit_boundary_override(self):
+        with self.assertRaisesRegex(ValueError, "require ASSET_VIEWER_PASSWORD"):
+            serve("0.0.0.0", 0, ["gallery.example.com"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -5,14 +5,17 @@ import json
 import os
 import stat
 import sys
+import time
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
 from . import __version__
-from .app import LOOPBACK_HOSTS, scan_collection, serve
+from .app import LOOPBACK_HOSTS, capability_document, scan_collection, serve
 from .storage import (
     add_collection,
+    catalog_records,
+    catalog_state,
     collections,
     complete_collection_review,
     data_dir,
@@ -20,6 +23,7 @@ from .storage import (
     pending_summary,
     remove_collection,
     reopen_collection_review,
+    review_events_since,
     review_history,
     review_manifest,
     root_for,
@@ -58,7 +62,7 @@ def scan_registered(collection: str | None = None) -> list[tuple[str, int, bool]
             raise ValueError(f"collection not found: {collection}")
     result = []
     for row in rows:
-        images, meta = scan_collection(row["slug"])
+        images, meta = scan_collection(row["slug"], force=True)
         result.append((row["slug"], len(images), bool(meta["truncated"])))
     return result
 
@@ -91,8 +95,15 @@ def doctor(host: str, trusted_hosts: list[str]) -> int:
     findings.append(("PASS" if rows else "INFO", f"registered collections: {len(rows)}"))
     for row in rows:
         path = Path(row["path"])
-        readable = os.access(path, os.R_OK | os.X_OK)
-        findings.append(("PASS" if readable else "FAIL", f"{row['slug']}: {'readable' if readable else 'not readable'} — {path}"))
+        available = bool(row.get("available"))
+        readable = available and os.access(path, os.R_OK | os.X_OK)
+        findings.append(("PASS" if readable else "FAIL", f"{row['slug']}: {'readable' if readable else 'unavailable/not readable'} — {path}"))
+        state = catalog_state(row["slug"])
+        if state["generation"]:
+            if state["truncated"]:
+                findings.append(("WARN", f"{row['slug']}: latest catalog scan incomplete ({state['reason'] or 'unknown'})"))
+            else:
+                findings.append(("PASS", f"{row['slug']}: catalog generation {state['generation']} last scanned {state['last_scan_at']}"))
     normalized = {item.lower().rstrip('.') for item in trusted_hosts}
     if host not in LOOPBACK_HOSTS and not normalized:
         findings.append(("FAIL", "non-loopback bind has no --trusted-host"))
@@ -101,6 +112,9 @@ def doctor(host: str, trusted_hosts: list[str]) -> int:
     else:
         findings.append(("PASS", "loopback bind is the safest default"))
     findings.append(("PASS" if os.environ.get("ASSET_VIEWER_PASSWORD") else "INFO", "built-in Basic auth " + ("enabled" if os.environ.get("ASSET_VIEWER_PASSWORD") else "disabled (acceptable for localhost/private proxy use)")))
+    findings.append(("WARN", "built-in http.server is intended for local/private use; use a production reverse proxy/access boundary for remote service"))
+    findings.append(("INFO", f"scan limits: files={os.environ.get('ASSET_VIEWER_MAX_SCAN_FILES', '50000')} seconds={os.environ.get('ASSET_VIEWER_MAX_SCAN_SECONDS', '10')}"))
+    findings.append(("INFO", f"preview limits: bytes={os.environ.get('ASSET_VIEWER_MAX_THUMBNAIL_BYTES', str(250 * 1024 * 1024))} pixels={os.environ.get('ASSET_VIEWER_MAX_IMAGE_PIXELS', '50000000')} workers={os.environ.get('ASSET_VIEWER_THUMBNAIL_WORKERS', '2')}"))
     failures = 0
     for level, text in findings:
         print(f"[{level}] {text}")
@@ -122,6 +136,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("list", help="List registered folders")
 
+    capabilities = sub.add_parser("capabilities", help="Describe the agent/API protocol and enabled capabilities")
+    capabilities.add_argument("--json", action="store_true")
+
     scan = sub.add_parser("scan", help="Discover assets and refresh review metadata")
     scan.add_argument("--collection")
 
@@ -130,17 +147,33 @@ def build_parser() -> argparse.ArgumentParser:
     reviews.add_argument("--status", choices=["approved", "maybe", "rejected", "unreviewed", "new"])
     reviews.add_argument("--json", action="store_true")
     reviews.add_argument("--no-scan", action="store_true", help="Do not scan folders before reading the manifest")
+    reviews.add_argument("--present-only", action="store_true", help="Exclude tombstoned/missing assets")
 
     export = sub.add_parser("export-manifest", help="Export machine-readable review state")
     export.add_argument("--collection")
     export.add_argument("--status", choices=["approved", "maybe", "rejected", "unreviewed", "new"])
     export.add_argument("--output", default="-", help="Output file or - for stdout")
     export.add_argument("--no-scan", action="store_true")
+    export.add_argument("--present-only", action="store_true", help="Exclude tombstoned/missing assets")
 
     pending = sub.add_parser("pending", help="Report collections still waiting for human review")
     pending.add_argument("--collection")
     pending.add_argument("--json", action="store_true")
     pending.add_argument("--no-scan", action="store_true")
+
+    events = sub.add_parser("events", help="Read ordered review events for agents/automation")
+    events.add_argument("--collection")
+    events.add_argument("--after", type=int, default=0, dest="after_id")
+    events.add_argument("--limit", type=int, default=100)
+    events.add_argument("--json", action="store_true")
+
+    wait = sub.add_parser("wait-for-review", help="Wait until review is explicitly complete")
+    wait.add_argument("--collection")
+    wait.add_argument("--timeout", type=float, default=300.0, help="Maximum seconds to wait")
+    wait.add_argument("--interval", type=float, default=2.0, help="Seconds between review-state checks")
+    wait.add_argument("--scan-interval", type=float, default=30.0, help="Seconds between filesystem rescans")
+    wait.add_argument("--json", action="store_true")
+    wait.add_argument("--no-scan", action="store_true")
 
     complete = sub.add_parser("complete", help="Mark a collection review complete")
     complete.add_argument("collection")
@@ -162,11 +195,20 @@ def build_parser() -> argparse.ArgumentParser:
     url.add_argument("collection")
     url.add_argument("--base-url", default="http://127.0.0.1:8160")
 
+    asset_url = sub.add_parser("asset-url", help="Print a stable browser deep link for one asset")
+    asset_url.add_argument("collection")
+    asset_url.add_argument("asset", help="Stable asset ID or relative path")
+    asset_url.add_argument("--base-url", default="http://127.0.0.1:8160")
+
     run = sub.add_parser("serve", help="Run the web viewer")
     run.add_argument("--host", default="127.0.0.1")
     run.add_argument("--port", type=int, default=8160)
     run.add_argument("--trusted-host", action="append", default=[], help="Allowed Host header (repeatable). Required for non-loopback binds and reverse proxies.")
     run.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], default="INFO")
+    run.add_argument(
+        "--allow-unauthenticated-remote", action="store_true",
+        help="Allow a non-loopback listener without built-in Basic auth. Use only behind a trusted authenticated/private boundary.",
+    )
 
     check = sub.add_parser("doctor", help="Check deployment safety and local state")
     check.add_argument("--host", default="127.0.0.1")
@@ -193,17 +235,28 @@ def main() -> None:
                 print("No folders registered.")
             for row in rows:
                 print(f"{row['slug']}\t{row['label']}\t{row['path']}")
+        elif args.command == "capabilities":
+            payload = capability_document()
+            if args.json:
+                print(json.dumps(payload, indent=2, sort_keys=True))
+            else:
+                enabled = [name for name, value in payload["features"].items() if value]
+                print(f"Asset Viewer {payload['app_version']} protocol v{payload['protocol_version']}")
+                print("Features: " + ", ".join(enabled))
         elif args.command == "scan":
             for slug, count, truncated in scan_registered(args.collection):
                 print(f"{slug}\t{count} images\t{'TRUNCATED' if truncated else 'complete'}")
         elif args.command == "reviews":
             if not args.no_scan:
                 scan_registered(args.collection)
-            print_manifest(review_manifest(args.collection, args.status), args.json)
+            print_manifest(review_manifest(args.collection, args.status, include_missing=not args.present_only), args.json)
         elif args.command == "export-manifest":
             if not args.no_scan:
                 scan_registered(args.collection)
-            payload = json.dumps(review_manifest(args.collection, args.status), indent=2, sort_keys=True) + "\n"
+            payload = json.dumps(
+                review_manifest(args.collection, args.status, include_missing=not args.present_only),
+                indent=2, sort_keys=True
+            ) + "\n"
             if args.output == "-":
                 sys.stdout.write(payload)
             else:
@@ -220,6 +273,39 @@ def main() -> None:
                     marker = "PENDING" if state["pending"] else "COMPLETE"
                     print(f"{marker}\t{state['collection']}\tunreviewed={state['unreviewed']} new={state['new']} completed_at={state['completed_at'] or '-'}")
             raise SystemExit(2 if payload["pending"] else 0)
+        elif args.command == "events":
+            payload = review_events_since(args.collection, args.after_id, args.limit)
+            if args.json:
+                print(json.dumps(payload, indent=2, sort_keys=True))
+            else:
+                for event in payload["events"]:
+                    target = event["rel"] or "(collection)"
+                    print(f"{event['id']}\t{event['created_at']}\t{event['collection']}\t{target}\t{event['action']}")
+        elif args.command == "wait-for-review":
+            timeout = max(0.0, args.timeout)
+            interval = max(0.1, args.interval)
+            scan_interval = max(interval, args.scan_interval)
+            started = time.monotonic()
+            last_scan = -scan_interval
+            while True:
+                elapsed = time.monotonic() - started
+                if not args.no_scan and elapsed - last_scan >= scan_interval:
+                    scan_registered(args.collection)
+                    last_scan = elapsed
+                payload = pending_summary(args.collection)
+                if not payload["pending"]:
+                    if args.json:
+                        print(json.dumps(payload, indent=2, sort_keys=True))
+                    else:
+                        print("Review complete")
+                    raise SystemExit(0)
+                if elapsed >= timeout:
+                    if args.json:
+                        print(json.dumps(payload, indent=2, sort_keys=True))
+                    else:
+                        print("Review still pending")
+                    raise SystemExit(2)
+                time.sleep(min(interval, max(0.0, timeout - elapsed)))
         elif args.command == "complete":
             if not root_for(args.collection):
                 raise ValueError(f"collection not found: {args.collection}")
@@ -252,8 +338,20 @@ def main() -> None:
             if not root_for(args.collection):
                 raise ValueError(f"collection not found: {args.collection}")
             print(args.base_url.rstrip('/') + "/c/" + args.collection)
+        elif args.command == "asset-url":
+            if not root_for(args.collection):
+                raise ValueError(f"collection not found: {args.collection}")
+            records = catalog_records(args.collection, present_only=False)
+            asset = next((row for row in records if row["asset_id"] == args.asset or row["rel"] == args.asset), None)
+            if not asset:
+                raise ValueError(f"asset not found: {args.asset}")
+            base = args.base_url.rstrip('/')
+            print(base + "/c/" + args.collection + "?asset=" + asset["asset_id"])
         elif args.command == "serve":
-            serve(args.host, args.port, args.trusted_host, log_level=args.log_level)
+            serve(
+                args.host, args.port, args.trusted_host, log_level=args.log_level,
+                allow_unauthenticated_remote=args.allow_unauthenticated_remote,
+            )
         elif args.command == "doctor":
             raise SystemExit(doctor(args.host, args.trusted_host))
         elif args.command == "demo":

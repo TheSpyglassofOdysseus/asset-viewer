@@ -19,14 +19,14 @@ Asset Viewer is the **review plane**, not the storage plane. Projects and creati
 Target: make private/server deployments robust enough to recommend confidently.
 
 - Replace or wrap the development `http.server` listener with a production serving layer.
-- [~] Review/comment/seen state is now transactional SQLite with migration; stable asset IDs and indexed catalog records remain open.
-- Build an indexed catalog so page loads do not recursively scan every source directory.
-- [~] Image byte/pixel/scan limits are implemented; background worker isolation remains open.
+- [x] Review/comment/seen state and the asset catalog are transactional SQLite with migrations, stable UUID asset IDs, and SHA-256-bound non-empty review decisions.
+- [~] Durable catalog + cached reads, tombstones, content-change invalidation, and rename reconciliation are implemented; a filesystem watcher remains open for immediate discovery without explicit/TTL rescans.
+- [~] Image byte/pixel/scan limits and bounded concurrent decoding are implemented; process-isolated preview workers remain open.
 - [x] SVG previews are inert JPEG placeholders and originals are forced downloads.
-- [~] CSRF/origin protections, trusted hosts, and optional Basic auth are implemented; stronger proxy identity/session auth remains open.
+- [~] CSRF/origin protections and trusted hosts are implemented; direct non-loopback serving now requires Basic auth unless an operator explicitly acknowledges another trusted access boundary. Stronger proxy identity/session auth remains open.
 - [~] Regression coverage now includes traversal, symlinks, Host/Origin, CSRF, SVG, non-image disclosure, concurrent writes, and permissions; fuzz/malformed-image/request-budget coverage remains open.
-- [x] `asset-viewer doctor` reports bind, permissions, collection readability, and auth posture; richer decoder/staleness diagnostics can grow later.
-- [~] Branch rules, pinned Actions, Dependabot, CodeQL, Bandit/pip-audit, and PR dependency review are in place; SBOM/provenance/signing remain open.
+- [x] `asset-viewer doctor` reports bind/auth posture, unavailable collections, catalog scan state, permissions, and resource-limit configuration.
+- [~] Branch rules, pinned Actions, Dependabot, CodeQL, Bandit/pip-audit, and PR dependency review are in place; CycloneDX SBOM generation is now in security CI; provenance/signing remain open.
 
 ## P1 — close the human/agent review loop
 
@@ -62,19 +62,14 @@ Planned CLI/API concepts:
 asset-viewer collection create
 asset-viewer collection-url
 asset-viewer reviews --json
-asset-viewer pending --json  # implemented; review sessions/events remain next
-asset-viewer wait-for-review
-asset-viewer export-manifest
+asset-viewer pending --json       # implemented
+asset-viewer events --after N     # implemented
+asset-viewer wait-for-review      # implemented
+asset-viewer export-manifest      # implemented
+asset-viewer asset-url             # implemented
 ```
 
-Event concepts:
-
-```text
-asset.approved
-asset.rejected
-asset.commented
-collection.review_complete
-```
+Ordered review events are implemented with stable asset IDs. Future webhook/MCP adapters can translate events such as review, comment, content-change, collection-complete, and collection-reopen into push-based integrations without changing the core database contract.
 
 The intended loop is:
 
@@ -84,15 +79,16 @@ The intended loop is:
 
 Target: support high-volume visual iteration without becoming an editor or DAM.
 
-- Zoom/pan and fit modes.
+- Zoom/pan and fit modes; linked transforms across comparison panes remain open.
 - [~] Filename/path search is implemented; metadata search remains open.
-- [~] Sort by time/name/status is implemented; dimensions/type/generation-metadata sorting remains open.
+- [~] Sort by time/name/status/file-size/resolution is implemented; type/generation-metadata sorting remains open.
 - Prompt/model/generation metadata display where available.
 - Contact-sheet export.
-- Compare/overlay/difference views.
-- Version/variant families.
+- Pinned/anchored annotations with normalized image coordinates and agent-readable events. **Highest-value next human-feedback feature.**
+- [x] Side-by-side, overlay, and difference comparison views; synchronized zoom/pan remains open.
+- Version/variant families. **Highest-value structural creative feature after pinned annotations.**
 - Nested collection navigation.
-- Review history and activity views.
+- [~] Per-asset review history and ordered machine event feed are implemented; human-facing collection activity view remains open.
 - Export/copy approved sets without changing source-of-truth semantics.
 
 Variant families are particularly important for generative workflows:

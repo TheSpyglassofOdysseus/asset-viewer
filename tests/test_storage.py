@@ -130,6 +130,8 @@ class StorageTests(unittest.TestCase):
 
     def test_collection_completion_and_pending_summary(self):
         storage.add_collection(str(self.images), "Images")
+        (self.images / "a.png").write_bytes(b"asset-a")
+        (self.images / "b.png").write_bytes(b"asset-b")
         storage.ensure_assets("images", ["a.png", "b.png"])
         state = storage.collection_review_state("images")
         self.assertTrue(state["pending"])
@@ -145,6 +147,7 @@ class StorageTests(unittest.TestCase):
 
     def test_completed_collection_becomes_stale_when_new_asset_is_discovered(self):
         storage.add_collection(str(self.images), "Images")
+        (self.images / "a.png").write_bytes(b"asset-a")
         storage.ensure_assets("images", ["a.png"])
         storage.set_review("images", "a.png", "approved")
         storage.complete_collection_review("images")

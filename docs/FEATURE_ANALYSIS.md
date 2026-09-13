@@ -67,49 +67,49 @@ That loop is more important than adding decorative gallery features. It makes As
 
 ### Machine-readable review API and CLI
 
-Add `asset-viewer reviews`, `asset-viewer status`, JSON output, and documented HTTP endpoints for review state.
+Implemented substantially: `reviews`, `pending`, `events`, `wait-for-review`, manifest export, and documented HTTP state/event endpoints form the agent-facing review contract.
 
 **Why necessary:** without this, agents can create review work but cannot reliably consume the resulting decisions.
 
 ### Stable asset identity
 
-Review state currently follows collection + relative path. Renaming or moving a file can orphan its decision. Introduce stable IDs based on catalog records and content/file identity.
+Implemented in v0.4: each cataloged asset has a stable UUID. Same-filesystem renames preserve review state/history; non-empty decisions are SHA-256-bound to reviewed bytes, so content replacement invalidates stale approval and re-enters review.
 
 **Why necessary:** review decisions must survive ordinary workflow changes.
 
 ### Indexed catalog and filesystem watcher
 
-Replace recursive re-discovery on each refresh with a durable catalog that incrementally notices adds, changes, deletes, and renames.
+The durable SQLite catalog and cached gallery reads are implemented in v0.4, including additions, replacements, deletions/tombstones, and unambiguous same-filesystem renames. A filesystem watcher remains future work; explicit/TTL reconciliation is the correctness fallback.
 
-**Why necessary:** scale and responsiveness. A filesystem viewer should remain fast at tens or hundreds of thousands of assets.
+**Why necessary:** scale and responsiveness. A filesystem viewer should remain fast as collections grow without making filesystem events the sole source of truth.
 
 ### SQLite review/catalog state
 
-Move from JSON files to SQLite.
+Implemented: transactional SQLite now stores review state, history, completion state, stable IDs, and catalog metadata.
 
 **Why necessary:** transactional writes, concurrency safety, indexing, future comments/audit history, and simpler backups.
 
 ### Compare mode
 
-Allow 2–4 assets to be viewed side-by-side at synchronized scale.
+Implemented substantially: 2–4 assets can be reviewed side-by-side, and two assets can use overlay or difference modes. Linked zoom/pan remains the important next comparison primitive.
 
 **Why necessary:** many generated-image decisions are relative ("A versus B"), not isolated yes/no decisions.
 
 ### Batch review
 
-Multi-select, bulk approve/reject/maybe, and "approve all selected."
+Implemented: multi-select plus bulk approve/reject/maybe/clear.
 
 **Why necessary:** large AI-generated batches make one-at-a-time classification unnecessarily expensive.
 
 ### Search, sort, and folder-aware navigation
 
-Filter by filename/path/status/date; sort; preserve folder context.
+Implemented substantially: filename/path/comment search plus status filtering and time/name/status/size/resolution sorting. Richer folder navigation remains open.
 
 **Why necessary:** collections become unusable once they exceed a few hundred assets.
 
 ### Notes/comments
 
-Allow a short review note attached to an asset.
+Implemented: a review note is stored with the stable asset record and exposed to agents. Precise pinned annotations remain future work.
 
 **Why necessary:** `maybe` and `reject` often need a reason that an agent can act on.
 
@@ -176,7 +176,7 @@ Those features weaken the strongest architectural advantage: **the filesystem/pr
 
 - Any agent capable of writing files and running a CLI can use the viewer.
 - No dependency on a specific model vendor or image generator.
-- A future review API closes the human-feedback loop in a model-neutral way.
+- The manifest, pending-state, event, and completion APIs close the human-feedback loop in a model-neutral way.
 
 ### Privacy and control
 
@@ -187,8 +187,12 @@ Those features weaken the strongest architectural advantage: **the filesystem/pr
 ### Operational simplicity
 
 - Small dependency footprint.
-- No external database requirement today; SQLite remains zero-admin when adopted.
+- SQLite is embedded and zero-admin; no external database service is required.
 - One viewer can span many project outputs.
+
+## Competitive audit
+
+The current product was compared against Frame.io, Canto, Pixieset, Air, Immich, and Photofield. The result reinforces the product direction: gallery/favorite features are commodity; the differentiator is durable filesystem-native review state that automation can consume. See [FEATURE_AUDIT_2026-09-13.md](FEATURE_AUDIT_2026-09-13.md).
 
 ## Strategic positioning
 

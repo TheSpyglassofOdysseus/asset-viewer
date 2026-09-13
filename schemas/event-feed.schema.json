@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/TheSpyglassofOdysseus/asset-viewer/schemas/event-feed.schema.json",
+  "title": "Asset Viewer event feed",
+  "type": "object",
+  "required": [
+    "version",
+    "generated_at",
+    "after_id",
+    "last_event_id",
+    "newest_event_id",
+    "events"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "after_id": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "last_event_id": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "newest_event_id": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "collection",
+          "rel",
+          "action",
+          "created_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "collection": {
+            "type": "string"
+          },
+          "rel": {
+            "type": "string"
+          },
+          "asset_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "action": {
+            "type": "string"
+          },
+          "old_status": {
+            "type": "string"
+          },
+          "new_status": {
+            "type": "string"
+          },
+          "old_comment": {
+            "type": "string"
+          },
+          "new_comment": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "undone_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "details": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}
