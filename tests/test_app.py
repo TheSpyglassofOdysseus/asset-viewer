@@ -32,6 +32,15 @@ class AppTests(unittest.TestCase):
         os.environ.pop("ASSET_VIEWER_CACHE", None)
         self.tmp.cleanup()
 
+    def test_gallery_includes_select_all_control(self):
+        html = (Path(__file__).parents[1] / "asset_viewer" / "static" / "index.html").read_text()
+        js = (Path(__file__).parents[1] / "asset_viewer" / "static" / "app.js").read_text()
+        self.assertIn('id="selectAll"', html)
+        self.assertIn("function selectAllVisible()", js)
+        self.assertIn('id="reviewDecision"', html)
+        self.assertIn("function renderReviewDecision(asset)", js)
+        self.assertIn("decision-active", js)
+
     def test_image_discovery(self):
         rows = image_rows("samples")
         self.assertEqual(len(rows), 1)
