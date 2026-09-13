@@ -134,6 +134,33 @@ class WsgiTests(unittest.TestCase):
         self.assertEqual(items[0]["annotation_id"], annotation["annotation_id"])
         self.assertEqual(items[0]["text"], "move this")
 
+    def test_variant_family_api_round_trip(self):
+        Image.new("RGB", (80, 60), (90, 80, 70)).save(self.images / "sample-v2.png")
+        status, _, body = self.request("GET", "/api/gallery", query="collection=samples&refresh=1")
+        self.assertEqual(status, 200)
+        assets = json.loads(body)["images"]
+        ids = [asset["asset_id"] for asset in assets]
+        status, _, body = self.request(
+            "POST", "/api/family", origin="http://127.0.0.1:8160",
+            body={"collection": "samples", "action": "create", "name": "Sample variants", "asset_ids": ids},
+        )
+        self.assertEqual(status, 201)
+        family = json.loads(body)["family"]
+        status, _, body = self.request(
+            "POST", "/api/family", origin="http://127.0.0.1:8160",
+            body={"collection": "samples", "action": "prefer", "family_id": family["family_id"], "asset_id": ids[0]},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["family"]["preferred_asset_id"], ids[0])
+        status, _, body = self.request("GET", "/api/families", query="collection=samples")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["families"][0]["name"], "Sample variants")
+        status, _, body = self.request("GET", "/api/gallery", query="collection=samples")
+        self.assertEqual(status, 200)
+        gallery = json.loads(body)
+        self.assertEqual(len(gallery["families"]), 1)
+        self.assertTrue(any(asset["family_preferred"] for asset in gallery["images"]))
+
     def test_cross_origin_post_is_rejected(self):
         status, _, _ = self.request(
             "POST", "/api/review", origin="https://attacker.example",

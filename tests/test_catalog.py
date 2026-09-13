@@ -308,6 +308,58 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(deleted["annotation_id"], created["annotation_id"])
         self.assertEqual(storage.annotations_for_asset("images", asset_id), [])
 
+    def test_variant_family_survives_rename_and_reaches_manifest(self):
+        first = self.make_image("concept-v1.png", (10, 20, 30))
+        self.make_image("concept-v2.png", (40, 50, 60))
+        rows, _ = scan_collection("images", force=True)
+        ids = {row["rel"]: row["asset_id"] for row in rows}
+        family = storage.create_family(
+            "images", "Launch concept", [ids["concept-v1.png"], ids["concept-v2.png"]], ids["concept-v2.png"]
+        )
+        self.assertEqual(len(family["members"]), 2)
+        self.assertEqual(family["preferred_asset_id"], ids["concept-v2.png"])
+
+        first.rename(self.images / "concept-v1-renamed.png")
+        scan_collection("images", force=True)
+        refreshed = storage.families_for_collection("images")[0]
+        renamed = next(member for member in refreshed["members"] if member["asset_id"] == ids["concept-v1.png"])
+        self.assertEqual(renamed["rel"], "concept-v1-renamed.png")
+
+        manifest = storage.review_manifest("images")
+        item = next(item for item in manifest["items"] if item["asset_id"] == ids["concept-v2.png"])
+        self.assertEqual(item["family"]["family_id"], family["family_id"])
+        self.assertTrue(item["family"]["preferred"])
+        self.assertEqual(manifest["families"][0]["name"], "Launch concept")
+
+    def test_family_membership_is_exclusive_and_source_files_are_untouched(self):
+        self.make_image("a.png")
+        self.make_image("b.png")
+        self.make_image("c.png")
+        rows, _ = scan_collection("images", force=True)
+        ids = {row["rel"]: row["asset_id"] for row in rows}
+        family = storage.create_family("images", "A/B", [ids["a.png"], ids["b.png"]])
+        with self.assertRaisesRegex(ValueError, "already belong"):
+            storage.create_family("images", "Conflicting", [ids["a.png"], ids["c.png"]])
+        updated = storage.add_family_members("images", family["family_id"], [ids["c.png"]])
+        self.assertEqual(len(updated["members"]), 3)
+        storage.remove_family_members("images", family["family_id"], [ids["a.png"], ids["b.png"]])
+        deleted = storage.remove_family_members("images", family["family_id"], [ids["c.png"]])
+        self.assertIsNone(deleted)
+        self.assertTrue(all((self.images / name).exists() for name in ("a.png", "b.png", "c.png")))
+
+    def test_family_changes_emit_ordered_agent_events(self):
+        self.make_image("a.png")
+        self.make_image("b.png")
+        rows, _ = scan_collection("images", force=True)
+        ids = {row["rel"]: row["asset_id"] for row in rows}
+        family = storage.create_family("images", "Variants", list(ids.values()))
+        storage.set_family_preferred("images", family["family_id"], ids["b.png"])
+        storage.rename_family("images", family["family_id"], "Hero variants")
+        actions = [event["action"] for event in storage.review_events_since("images")["events"]]
+        self.assertIn("family_created", actions)
+        self.assertIn("family_preferred_changed", actions)
+        self.assertIn("family_renamed", actions)
+
     def test_catalog_handles_large_synthetic_collection_without_path_scans(self):
         discoveries = [
             {"rel": f"frames/{i:04d}.png", "device": 1, "inode": 1000 + i, "size": 2048 + i, "mtime_ns": 1_000_000 + i, "width": 1024, "height": 768, "preview_error": None}

@@ -69,7 +69,7 @@ asset-viewer export-manifest      # implemented
 asset-viewer asset-url             # implemented
 ```
 
-Ordered review events are implemented with stable asset IDs. Future webhook/MCP adapters can translate events such as review, comment, content-change, collection-complete, and collection-reopen into push-based integrations without changing the core database contract.
+Ordered review events are implemented with stable asset IDs. Family lifecycle/preferred-member changes now join that feed. Future webhook/MCP adapters can translate events such as review, comment, content-change, family changes, collection-complete, and collection-reopen into push-based integrations without changing the core database contract.
 
 The intended loop is:
 
@@ -86,12 +86,12 @@ Target: support high-volume visual iteration without becoming an editor or DAM.
 - Contact-sheet export.
 - [x] Point/region annotations with normalized coordinates, resolve/reopen state, content-bound staleness, manifest/API/CLI exposure, and agent-readable events.
 - [x] Side-by-side, overlay, and difference comparison views with linked/independent zoom and pan.
-- Version/variant families. **Highest-value next product feature.**
+- [x] Version/variant families with stable-ID membership, preferred/latest semantics, manifest/API/CLI exposure, family events, and direct family comparison.
 - Nested collection navigation.
 - [~] Per-asset review history and ordered machine event feed are implemented; human-facing collection activity view remains open.
 - Export/copy approved sets without changing source-of-truth semantics.
 
-Variant families are particularly important for generative workflows:
+Variant families are now implemented for generative workflows:
 
 ```text
 Logo concept

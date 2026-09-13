@@ -70,6 +70,12 @@
       "items": {
         "$ref": "#/$defs/reviewItem"
       }
+    },
+    "families": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/family"
+      }
     }
   },
   "$defs": {
@@ -174,6 +180,34 @@
           "items": {
             "$ref": "#/$defs/annotation"
           }
+        },
+        "family": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "family_id",
+                "name",
+                "preferred"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "family_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "preferred": {
+                  "type": "boolean"
+                }
+              }
+            }
+          ]
         }
       },
       "additionalProperties": true
@@ -259,6 +293,126 @@
             "null"
           ],
           "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "familyMember": {
+      "type": "object",
+      "required": [
+        "asset_id",
+        "collection",
+        "rel",
+        "status",
+        "comment",
+        "present",
+        "preferred"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "asset_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "collection": {
+          "type": "string"
+        },
+        "rel": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "",
+            "approved",
+            "maybe",
+            "rejected"
+          ]
+        },
+        "comment": {
+          "type": "string"
+        },
+        "present": {
+          "type": "boolean"
+        },
+        "preferred": {
+          "type": "boolean"
+        },
+        "mtime_ns": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "width": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "height": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "added_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "family": {
+      "type": "object",
+      "required": [
+        "family_id",
+        "collection",
+        "name",
+        "preferred_asset_id",
+        "latest_asset_id",
+        "created_at",
+        "updated_at",
+        "members"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "family_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "collection": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "preferred_asset_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "latest_asset_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/familyMember"
+          }
         }
       }
     }

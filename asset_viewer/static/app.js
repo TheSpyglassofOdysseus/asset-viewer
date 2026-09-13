@@ -1,6 +1,7 @@
 let state = {
   collections: [],
   images: [],
+  families: [],
   filtered: [],
   current: 0,
   csrf: '',
@@ -72,6 +73,7 @@ async function load(requested, force = false) {
   const data = await response.json();
   state.collections = data.collections;
   state.images = data.images;
+  state.families = data.families || [];
   state.active = data.active;
   state.reviewState = data.review_state;
   state.selected.clear();
@@ -114,7 +116,7 @@ function applyFilter() {
   let rows = state.images.filter(asset => {
     const statusMatch = filter === 'all' ||
       (filter === 'new' ? asset.is_new : (filter === 'unreviewed' ? !asset.status : asset.status === filter));
-    const haystack = `${asset.name} ${asset.rel} ${asset.comment || ''}`.toLowerCase();
+    const haystack = `${asset.name} ${asset.rel} ${asset.comment || ''} ${asset.family_name || ''}`.toLowerCase();
     return statusMatch && (!query || haystack.includes(query));
   });
   const rank = {'': 0, maybe: 1, approved: 2, rejected: 3};
@@ -136,7 +138,7 @@ function applyFilter() {
       <div class="caption">
         <div class="name">${esc(asset.name)}</div>
         <div class="path">${esc(asset.rel)}</div>
-        <div class="meta-row">${asset.is_new ? '<span class="new-dot">new</span>' : ''}${asset.comment ? '<span class="note-dot">note</span>' : ''}${asset.annotation_count ? `<span class="note-dot">${asset.annotation_count} pinned</span>` : ''}</div>
+        <div class="meta-row">${asset.is_new ? '<span class="new-dot">new</span>' : ''}${asset.comment ? '<span class="note-dot">note</span>' : ''}${asset.annotation_count ? `<span class="note-dot">${asset.annotation_count} pinned</span>` : ''}${asset.family_name ? `<span class="family-chip">${esc(asset.family_name)}</span>` : ''}${asset.family_preferred ? '<span class="preferred-chip">preferred</span>' : ''}</div>
       </div>
     </article>`;
   }).join('');
@@ -174,6 +176,7 @@ function updateBulk() {
   $('#bulkbar').classList.toggle('hidden', count === 0);
   $('#selectedCount').textContent = `${count} selected`;
   $('#compare').disabled = count < 2;
+  $('#groupVariants').disabled = count < 2;
 }
 
 function updateReviewState() {
@@ -215,6 +218,27 @@ async function refreshReviewState() {
   updateReviewState();
 }
 
+function familyById(familyId) {
+  return state.families.find(family => family.family_id === familyId) || null;
+}
+
+function renderFamilyRow(asset) {
+  const row = $('#familyRow');
+  if (!asset || !asset.family_id) {
+    row.classList.add('hidden');
+    return;
+  }
+  const family = familyById(asset.family_id);
+  const count = family ? family.members.filter(member => member.present).length : state.images.filter(item => item.family_id === asset.family_id).length;
+  const latest = family && family.latest_asset_id === asset.asset_id;
+  $('#familyName').textContent = asset.family_name || (family && family.name) || 'Variant family';
+  $('#familyMeta').textContent = `${count} variant${count === 1 ? '' : 's'}${asset.family_preferred ? ' · preferred' : ''}${latest ? ' · latest' : ''}`;
+  $('#setPreferred').disabled = Boolean(asset.family_preferred);
+  $('#setPreferred').textContent = asset.family_preferred ? 'Preferred' : 'Set preferred';
+  $('#compareFamily').disabled = count < 2;
+  row.classList.remove('hidden');
+}
+
 function openAt(index, updateUrl = true) {
   if (!state.filtered.length) return;
   state.current = (index + state.filtered.length) % state.filtered.length;
@@ -225,6 +249,7 @@ function openAt(index, updateUrl = true) {
   $('#details').textContent = `${asset.rel} · ${asset.width || '?'}×${asset.height || '?'} · ${formatBytes(asset.size)}`;
   $('#original').href = asset.file;
   $('#comment').value = asset.comment || '';
+  renderFamilyRow(asset);
   $('#historyPanel').classList.add('hidden');
   const notice = $('#previewNotice');
   notice.textContent = asset.preview_error || '';
@@ -553,6 +578,65 @@ function annotationPointerUp(event) {
   createSpatialAnnotation('region', {x, y, w, h}).catch(showError);
 }
 
+async function groupVariants() {
+  const assets = state.images.filter(asset => state.selected.has(keyFor(asset)));
+  if (assets.length < 2) return;
+  const familyIds = [...new Set(assets.map(asset => asset.family_id).filter(Boolean))];
+  if (familyIds.length > 1) throw new Error('Selected assets span multiple existing families. Remove them first or group one family at a time.');
+  if (familyIds.length === 1) {
+    const ungrouped = assets.filter(asset => !asset.family_id);
+    if (!ungrouped.length) throw new Error('Those assets are already in the same family.');
+    await apiPost('/api/family', {collection: state.active, action: 'add', family_id: familyIds[0], asset_ids: ungrouped.map(asset => asset.asset_id)});
+  } else {
+    const suggested = assets.map(asset => asset.name.replace(/\.[^.]+$/, '').replace(/[-_ ]?(v|variant|concept)?\d+$/i, '')).filter(Boolean)[0] || 'Variant family';
+    const name = window.prompt('Name this variant family', suggested);
+    if (!name) return;
+    await apiPost('/api/family', {collection: state.active, action: 'create', name, asset_ids: assets.map(asset => asset.asset_id)});
+  }
+  await load(state.active);
+}
+
+async function setPreferredFamilyMember() {
+  const asset = state.filtered[state.current];
+  if (!asset || !asset.family_id) return;
+  await apiPost('/api/family', {collection: asset.collection, action: 'prefer', family_id: asset.family_id, asset_id: asset.asset_id});
+  await load(state.active);
+}
+
+async function leaveFamily() {
+  const asset = state.filtered[state.current];
+  if (!asset || !asset.family_id) return;
+  await apiPost('/api/family', {collection: asset.collection, action: 'remove', family_id: asset.family_id, asset_ids: [asset.asset_id]});
+  await load(state.active);
+}
+
+function openCompareAssets(assets) {
+  state.compareAssets = assets.slice(0, 4);
+  if (state.compareAssets.length < 2) return;
+  state.compareMode = 'side';
+  state.compareLinked = true;
+  resetCompareView(false);
+  $('#overlayRange').value = '50';
+  renderCompare();
+  compareModal.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+}
+
+function openFamilyCompare() {
+  const asset = state.filtered[state.current];
+  if (!asset || !asset.family_id) return;
+  const family = familyById(asset.family_id);
+  const members = state.images.filter(item => item.family_id === asset.family_id && item.present !== false);
+  members.sort((a, b) => {
+    if (a.asset_id === family?.preferred_asset_id) return -1;
+    if (b.asset_id === family?.preferred_asset_id) return 1;
+    if (a.asset_id === asset.asset_id) return -1;
+    if (b.asset_id === asset.asset_id) return 1;
+    return (b.mtime || 0) - (a.mtime || 0);
+  });
+  openCompareAssets(members);
+}
+
 function clearSelection() {
   state.selected.clear();
   applyFilter();
@@ -686,15 +770,7 @@ function toggleCompareLinked() {
 }
 
 function openCompare() {
-  state.compareAssets = selectedAssets();
-  if (state.compareAssets.length < 2) return;
-  state.compareMode = 'side';
-  state.compareLinked = true;
-  resetCompareView(false);
-  $('#overlayRange').value = '50';
-  renderCompare();
-  compareModal.classList.remove('hidden');
-  document.body.style.overflow = 'hidden';
+  openCompareAssets(selectedAssets());
 }
 
 function closeCompare() {
@@ -720,12 +796,16 @@ $('#undoReview').onclick = () => undoReview().catch(showError);
 $('#showHistory').onclick = () => showHistory().catch(showError);
 $('#copyPath').onclick = () => copyPath().catch(showError);
 $('#copyReviewLink').onclick = () => copyReviewLink().catch(showError);
+$('#compareFamily').onclick = openFamilyCompare;
+$('#setPreferred').onclick = () => setPreferredFamilyMember().catch(showError);
+$('#leaveFamily').onclick = () => leaveFamily().catch(showError);
 $('#pointAnnotation').onclick = () => setAnnotationMode(state.annotationMode === 'point' ? null : 'point');
 $('#regionAnnotation').onclick = () => setAnnotationMode(state.annotationMode === 'region' ? null : 'region');
 $('#cancelAnnotation').onclick = cancelAnnotationMode;
 $('#annotationLayer').onpointerdown = annotationPointerDown;
 $('#annotationLayer').onpointermove = annotationPointerMove;
 $('#annotationLayer').onpointerup = annotationPointerUp;
+$('#groupVariants').onclick = () => groupVariants().catch(showError);
 $('#compare').onclick = openCompare;
 $('#compareLink').onclick = toggleCompareLinked;
 $('#compareReset').onclick = () => resetCompareView();

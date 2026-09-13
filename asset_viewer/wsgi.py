@@ -36,6 +36,13 @@ from .storage import (
     collection_review_state,
     collections,
     complete_collection_review,
+    create_family,
+    add_family_members,
+    remove_family_members,
+    set_family_preferred,
+    rename_family,
+    delete_family,
+    families_for_collection,
     mark_seen,
     pending_summary,
     reopen_collection_review,
@@ -258,7 +265,8 @@ class AssetViewerWSGI:
             force_scan = (query.get("refresh") or [""])[0].lower() in {"1", "true", "yes"}
             images, scan = scan_collection(active, force=force_scan) if active else ([], {"truncated": False, "reason": None, "elapsed_ms": 0, "cached": True})
             review_state = collection_review_state(active) if active else None
-            return _json_response(start_response, 200, {"collections": public_rows, "active": active, "images": images, "scan": scan, "review_state": review_state})
+            families = families_for_collection(active, include_missing=False) if active else []
+            return _json_response(start_response, 200, {"collections": public_rows, "active": active, "images": images, "families": families, "scan": scan, "review_state": review_state})
         if path == "/api/reviews":
             collection = (query.get("collection") or [None])[0]
             status = (query.get("status") or [None])[0]
@@ -281,6 +289,14 @@ class AssetViewerWSGI:
                 return _json_response(start_response, 200, pending_summary(collection))
             except ValueError as exc:
                 return _json_response(start_response, 400, {"error": str(exc)})
+        if path == "/api/families":
+            collection = (query.get("collection") or [""])[0]
+            if not collection:
+                return _json_response(start_response, 400, {"error": "collection is required"})
+            if not any(row["slug"] == collection for row in collections()):
+                return _json_response(start_response, 404, {"error": "collection not found"})
+            include_missing = (query.get("present") or [""])[0].lower() not in {"1", "true", "yes"}
+            return _json_response(start_response, 200, {"version": 1, "collection": collection, "families": families_for_collection(collection, include_missing=include_missing)})
         if path == "/api/annotations":
             collection = (query.get("collection") or [""])[0]
             asset_id = (query.get("asset_id") or [""])[0]
@@ -368,6 +384,35 @@ class AssetViewerWSGI:
                     raise ValueError("invalid seen request")
                 changed = mark_seen(slug, rels)
                 return _json_response(start_response, 200, {"ok": True, "changed": changed})
+            if path == "/api/family":
+                action = str(payload.get("action", "create"))
+                family_id = str(payload.get("family_id", ""))
+                asset_ids = payload.get("asset_ids")
+                if asset_ids is None and payload.get("asset_id"):
+                    asset_ids = [payload.get("asset_id")]
+                if asset_ids is not None and (not isinstance(asset_ids, list) or len(asset_ids) > 500):
+                    raise ValueError("asset_ids must be a list of at most 500 IDs")
+                ids = [str(asset_id) for asset_id in (asset_ids or []) if asset_id]
+                if action == "create":
+                    family = create_family(slug, str(payload.get("name", "")), ids, str(payload.get("preferred_asset_id")) if payload.get("preferred_asset_id") else None)
+                    return _json_response(start_response, 201, {"ok": True, "family": family})
+                if not family_id:
+                    raise ValueError("family_id is required")
+                if action == "add":
+                    family = add_family_members(slug, family_id, ids)
+                elif action == "remove":
+                    family = remove_family_members(slug, family_id, ids)
+                elif action == "prefer":
+                    preferred = payload.get("asset_id")
+                    family = set_family_preferred(slug, family_id, str(preferred) if preferred else None)
+                elif action == "rename":
+                    family = rename_family(slug, family_id, str(payload.get("name", "")))
+                elif action == "delete":
+                    family = delete_family(slug, family_id)
+                    return _json_response(start_response, 200, {"ok": True, "deleted": family})
+                else:
+                    raise ValueError("family action must be create, add, remove, prefer, rename, or delete")
+                return _json_response(start_response, 200, {"ok": True, "family": family})
             if path == "/api/annotation":
                 asset_id = str(payload.get("asset_id", ""))
                 action = str(payload.get("action", "create"))

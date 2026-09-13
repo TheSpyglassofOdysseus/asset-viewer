@@ -152,6 +152,24 @@ def _connect() -> sqlite3.Connection:
                 ON annotations(asset_id, stale, resolved, created_at);
             CREATE INDEX IF NOT EXISTS idx_annotations_collection
                 ON annotations(collection, created_at);
+            CREATE TABLE IF NOT EXISTS families (
+                family_id TEXT PRIMARY KEY,
+                collection TEXT NOT NULL,
+                name TEXT NOT NULL,
+                preferred_asset_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_families_collection
+                ON families(collection, updated_at DESC);
+            CREATE TABLE IF NOT EXISTS family_members (
+                family_id TEXT NOT NULL,
+                asset_id TEXT NOT NULL UNIQUE,
+                added_at TEXT NOT NULL,
+                PRIMARY KEY (family_id, asset_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_family_members_family
+                ON family_members(family_id, added_at);
             CREATE TABLE IF NOT EXISTS catalog_state (
                 collection TEXT PRIMARY KEY,
                 generation INTEGER NOT NULL DEFAULT 0,
@@ -441,6 +459,12 @@ def catalog_records(collection: str, present_only: bool = True) -> list[dict[str
         SELECT asset_id, collection, rel, status, comment, first_seen_at, seen_at, updated_at,
                device, inode, size, mtime_ns, width, height, preview_error, present, scan_generation,
                content_changed_at, missing_at, review_sha256,
+               (SELECT fm.family_id FROM family_members fm WHERE fm.asset_id=assets.asset_id LIMIT 1) AS family_id,
+               (SELECT f.name FROM family_members fm JOIN families f ON f.family_id=fm.family_id
+                WHERE fm.asset_id=assets.asset_id LIMIT 1) AS family_name,
+               (SELECT CASE WHEN f.preferred_asset_id=assets.asset_id THEN 1 ELSE 0 END
+                FROM family_members fm JOIN families f ON f.family_id=fm.family_id
+                WHERE fm.asset_id=assets.asset_id LIMIT 1) AS family_preferred,
                (SELECT COUNT(*) FROM annotations an
                 WHERE an.asset_id=assets.asset_id AND an.stale=0 AND an.resolved=0) AS annotation_count,
                (SELECT an.content_sha256 FROM annotations an
@@ -455,6 +479,224 @@ def catalog_records(collection: str, present_only: bool = True) -> list[dict[str
     with _connection() as conn:
         return [dict(row) for row in conn.execute(query, tuple(args))]
 
+
+
+def _family_name(value: Any) -> str:
+    name = str(value or "").strip()
+    if not name:
+        raise ValueError("family name is required")
+    if len(name) > 200:
+        raise ValueError("family name must be 200 characters or fewer")
+    return name
+
+
+def _family_member_rows(conn: sqlite3.Connection, family_id: str) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT a.asset_id, a.collection, a.rel, a.status, a.comment, a.present, a.mtime_ns,
+               a.width, a.height, fm.added_at
+        FROM family_members fm JOIN assets a ON a.asset_id=fm.asset_id
+        WHERE fm.family_id=?
+        ORDER BY COALESCE(a.mtime_ns, 0) DESC, fm.added_at, a.rel COLLATE NOCASE
+        """,
+        (family_id,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _family_payload(conn: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
+    members = _family_member_rows(conn, str(row["family_id"]))
+    latest = members[0]["asset_id"] if members else None
+    preferred = row["preferred_asset_id"]
+    return {
+        "family_id": str(row["family_id"]),
+        "collection": str(row["collection"]),
+        "name": str(row["name"]),
+        "preferred_asset_id": preferred,
+        "latest_asset_id": latest,
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+        "members": [member | {"preferred": member["asset_id"] == preferred} for member in members],
+    }
+
+
+def families_for_collection(collection: str, *, include_missing: bool = True) -> list[dict[str, Any]]:
+    with _connection() as conn:
+        rows = conn.execute(
+            "SELECT family_id, collection, name, preferred_asset_id, created_at, updated_at FROM families WHERE collection=? ORDER BY updated_at DESC, name COLLATE NOCASE",
+            (collection,),
+        ).fetchall()
+        payloads = [_family_payload(conn, row) for row in rows]
+    if include_missing:
+        return payloads
+    for family in payloads:
+        family["members"] = [member for member in family["members"] if member["present"]]
+        family["latest_asset_id"] = family["members"][0]["asset_id"] if family["members"] else None
+    return [family for family in payloads if family["members"]]
+
+
+def family_for_asset(collection: str, asset_id: str) -> dict[str, Any] | None:
+    with _connection() as conn:
+        row = conn.execute(
+            """SELECT f.family_id, f.collection, f.name, f.preferred_asset_id, f.created_at, f.updated_at
+               FROM family_members fm JOIN families f ON f.family_id=fm.family_id
+               WHERE fm.asset_id=? AND f.collection=?""",
+            (asset_id, collection),
+        ).fetchone()
+        return _family_payload(conn, row) if row else None
+
+
+def _validated_family_assets(conn: sqlite3.Connection, collection: str, asset_ids: Iterable[str]) -> list[str]:
+    ids = list(dict.fromkeys(str(asset_id) for asset_id in asset_ids if asset_id))
+    if not ids:
+        raise ValueError("at least one asset is required")
+    for asset_id in ids:
+        row = conn.execute(
+            "SELECT collection FROM assets WHERE asset_id=?",
+            (asset_id,),
+        ).fetchone()
+        if not row or str(row["collection"]) != collection:
+            raise ValueError("all family assets must belong to the collection")
+    return ids
+
+
+def create_family(collection: str, name: str, asset_ids: Iterable[str], preferred_asset_id: str | None = None) -> dict[str, Any]:
+    now = utc_now()
+    clean_name = _family_name(name)
+    with _connection() as conn:
+        ids = _validated_family_assets(conn, collection, asset_ids)
+        if len(ids) < 2:
+            raise ValueError("a new family requires at least two assets")
+        occupied = [
+            asset_id for asset_id in ids
+            if conn.execute("SELECT 1 FROM family_members WHERE asset_id=?", (asset_id,)).fetchone()
+        ]
+        if occupied:
+            raise ValueError("one or more assets already belong to a family")
+        if preferred_asset_id and preferred_asset_id not in ids:
+            raise ValueError("preferred asset must be a family member")
+        family_id = str(uuid.uuid4())
+        conn.execute(
+            "INSERT INTO families(family_id, collection, name, preferred_asset_id, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?)",
+            (family_id, collection, clean_name, preferred_asset_id, now, now),
+        )
+        conn.executemany(
+            "INSERT INTO family_members(family_id, asset_id, added_at) VALUES(?, ?, ?)",
+            [(family_id, asset_id, now) for asset_id in ids],
+        )
+        _record_system_event(conn, collection, "", preferred_asset_id, "family_created", now, {"family_id": family_id, "name": clean_name, "asset_ids": ids})
+        row = conn.execute("SELECT * FROM families WHERE family_id=?", (family_id,)).fetchone()
+        return _family_payload(conn, row)
+
+
+def add_family_members(collection: str, family_id: str, asset_ids: Iterable[str]) -> dict[str, Any]:
+    now = utc_now()
+    with _connection() as conn:
+        family = conn.execute("SELECT * FROM families WHERE family_id=? AND collection=?", (family_id, collection)).fetchone()
+        if not family:
+            raise ValueError("family not found")
+        ids = _validated_family_assets(conn, collection, asset_ids)
+        occupied = []
+        for asset_id in ids:
+            row = conn.execute(
+                "SELECT asset_id, family_id FROM family_members WHERE asset_id=?",
+                (asset_id,),
+            ).fetchone()
+            if row:
+                occupied.append(row)
+        conflicts = [row for row in occupied if row["family_id"] != family_id]
+        if conflicts:
+            raise ValueError("one or more assets already belong to another family")
+        existing = {str(row["asset_id"]) for row in occupied}
+        conn.executemany(
+            "INSERT INTO family_members(family_id, asset_id, added_at) VALUES(?, ?, ?)",
+            [(family_id, asset_id, now) for asset_id in ids if asset_id not in existing],
+        )
+        conn.execute("UPDATE families SET updated_at=? WHERE family_id=?", (now, family_id))
+        added = [asset_id for asset_id in ids if asset_id not in existing]
+        if added:
+            _record_system_event(conn, collection, "", None, "family_members_added", now, {"family_id": family_id, "asset_ids": added})
+        row = conn.execute("SELECT * FROM families WHERE family_id=?", (family_id,)).fetchone()
+        return _family_payload(conn, row)
+
+
+def remove_family_members(collection: str, family_id: str, asset_ids: Iterable[str]) -> dict[str, Any] | None:
+    now = utc_now()
+    ids = list(dict.fromkeys(str(asset_id) for asset_id in asset_ids if asset_id))
+    if not ids:
+        raise ValueError("at least one asset is required")
+    with _connection() as conn:
+        family = conn.execute("SELECT * FROM families WHERE family_id=? AND collection=?", (family_id, collection)).fetchone()
+        if not family:
+            raise ValueError("family not found")
+        removed = []
+        for asset_id in ids:
+            member = conn.execute(
+                "SELECT 1 FROM family_members WHERE family_id=? AND asset_id=?",
+                (family_id, asset_id),
+            ).fetchone()
+            if member:
+                removed.append(asset_id)
+        if removed:
+            conn.executemany(
+                "DELETE FROM family_members WHERE family_id=? AND asset_id=?",
+                [(family_id, asset_id) for asset_id in removed],
+            )
+            _record_system_event(conn, collection, "", None, "family_members_removed", now, {"family_id": family_id, "asset_ids": removed})
+        remaining = conn.execute("SELECT COUNT(*) AS n FROM family_members WHERE family_id=?", (family_id,)).fetchone()["n"]
+        if remaining == 0:
+            conn.execute("DELETE FROM families WHERE family_id=?", (family_id,))
+            _record_system_event(conn, collection, "", None, "family_deleted", now, {"family_id": family_id, "reason": "last_member_removed"})
+            return None
+        preferred = family["preferred_asset_id"]
+        if preferred in removed:
+            preferred = None
+        conn.execute("UPDATE families SET preferred_asset_id=?, updated_at=? WHERE family_id=?", (preferred, now, family_id))
+        row = conn.execute("SELECT * FROM families WHERE family_id=?", (family_id,)).fetchone()
+        return _family_payload(conn, row)
+
+
+def set_family_preferred(collection: str, family_id: str, asset_id: str | None) -> dict[str, Any]:
+    now = utc_now()
+    with _connection() as conn:
+        family = conn.execute("SELECT * FROM families WHERE family_id=? AND collection=?", (family_id, collection)).fetchone()
+        if not family:
+            raise ValueError("family not found")
+        if asset_id:
+            member = conn.execute("SELECT 1 FROM family_members WHERE family_id=? AND asset_id=?", (family_id, asset_id)).fetchone()
+            if not member:
+                raise ValueError("preferred asset must be a family member")
+        old = family["preferred_asset_id"]
+        conn.execute("UPDATE families SET preferred_asset_id=?, updated_at=? WHERE family_id=?", (asset_id, now, family_id))
+        _record_system_event(conn, collection, "", asset_id, "family_preferred_changed", now, {"family_id": family_id, "old_asset_id": old, "new_asset_id": asset_id})
+        row = conn.execute("SELECT * FROM families WHERE family_id=?", (family_id,)).fetchone()
+        return _family_payload(conn, row)
+
+
+def rename_family(collection: str, family_id: str, name: str) -> dict[str, Any]:
+    now = utc_now()
+    clean_name = _family_name(name)
+    with _connection() as conn:
+        family = conn.execute("SELECT * FROM families WHERE family_id=? AND collection=?", (family_id, collection)).fetchone()
+        if not family:
+            raise ValueError("family not found")
+        conn.execute("UPDATE families SET name=?, updated_at=? WHERE family_id=?", (clean_name, now, family_id))
+        _record_system_event(conn, collection, "", None, "family_renamed", now, {"family_id": family_id, "old_name": family["name"], "new_name": clean_name})
+        row = conn.execute("SELECT * FROM families WHERE family_id=?", (family_id,)).fetchone()
+        return _family_payload(conn, row)
+
+
+def delete_family(collection: str, family_id: str) -> dict[str, Any]:
+    now = utc_now()
+    with _connection() as conn:
+        family = conn.execute("SELECT * FROM families WHERE family_id=? AND collection=?", (family_id, collection)).fetchone()
+        if not family:
+            raise ValueError("family not found")
+        payload = _family_payload(conn, family)
+        conn.execute("DELETE FROM family_members WHERE family_id=?", (family_id,))
+        conn.execute("DELETE FROM families WHERE family_id=?", (family_id,))
+        _record_system_event(conn, collection, "", None, "family_deleted", now, {"family_id": family_id, "name": family["name"]})
+        return payload
 
 def _record_system_event(
     conn: sqlite3.Connection, collection: str, rel: str, asset_id: str | None,
@@ -1225,7 +1467,11 @@ def review_manifest(collection: str | None = None, status: str | None = None, in
     if status is not None and status not in VALID_STATUSES | {"unreviewed", "new"}:
         raise ValueError(f"invalid manifest status: {status}")
     labels = {row["slug"]: row["label"] for row in collections()}
-    query = "SELECT asset_id, collection, rel, status, comment, first_seen_at, seen_at, updated_at, present, size, mtime_ns, width, height, content_changed_at, missing_at, review_sha256 FROM assets"
+    query = """SELECT asset_id, collection, rel, status, comment, first_seen_at, seen_at, updated_at, present, size, mtime_ns, width, height, content_changed_at, missing_at, review_sha256,
+        (SELECT fm.family_id FROM family_members fm WHERE fm.asset_id=assets.asset_id LIMIT 1) AS family_id,
+        (SELECT f.name FROM family_members fm JOIN families f ON f.family_id=fm.family_id WHERE fm.asset_id=assets.asset_id LIMIT 1) AS family_name,
+        (SELECT CASE WHEN f.preferred_asset_id=assets.asset_id THEN 1 ELSE 0 END FROM family_members fm JOIN families f ON f.family_id=fm.family_id WHERE fm.asset_id=assets.asset_id LIMIT 1) AS family_preferred
+        FROM assets"""
     clauses: list[str] = []
     args: list[Any] = []
     if not include_missing:
@@ -1273,6 +1519,7 @@ def review_manifest(collection: str | None = None, status: str | None = None, in
                 "width": row["width"],
                 "height": row["height"],
                 "review_sha256": row["review_sha256"],
+                "family": ({"family_id": row["family_id"], "name": row["family_name"], "preferred": bool(row["family_preferred"])} if row["family_id"] else None),
                 "annotations": annotations_by_asset.get(str(row["asset_id"]), []),
                 "content_changed_at": row["content_changed_at"],
                 "missing_at": row["missing_at"],
@@ -1283,7 +1530,11 @@ def review_manifest(collection: str | None = None, status: str | None = None, in
         counts[item["status"] or "unreviewed"] += 1
         if item["present"] and item["seen_at"] is None:
             counts["new"] += 1
-    return {"version": 1, "generated_at": utc_now(), "counts": counts, "items": items}
+    family_rows = []
+    family_collections = [collection] if collection else sorted(labels)
+    for family_collection in family_collections:
+        family_rows.extend(families_for_collection(family_collection, include_missing=include_missing))
+    return {"version": 1, "generated_at": utc_now(), "counts": counts, "families": family_rows, "items": items}
 
 
 def _render_cache_path(source: Path, purpose: str) -> Path:

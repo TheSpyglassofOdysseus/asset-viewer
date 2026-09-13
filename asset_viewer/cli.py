@@ -23,6 +23,13 @@ from .storage import (
     catalog_state,
     collections,
     complete_collection_review,
+    create_family,
+    add_family_members,
+    remove_family_members,
+    set_family_preferred,
+    rename_family,
+    delete_family,
+    families_for_collection,
     data_dir,
     database_path,
     pending_summary,
@@ -222,6 +229,46 @@ def build_parser() -> argparse.ArgumentParser:
     asset_url.add_argument("asset", help="Stable asset ID or relative path")
     asset_url.add_argument("--base-url", default="http://127.0.0.1:8160")
 
+    families = sub.add_parser("families", help="List variant/version families")
+    families.add_argument("collection")
+    families.add_argument("--json", action="store_true")
+    families.add_argument("--present-only", action="store_true")
+
+    family_create = sub.add_parser("family-create", help="Create a variant/version family")
+    family_create.add_argument("collection")
+    family_create.add_argument("name")
+    family_create.add_argument("assets", nargs="+", help="Stable asset IDs or relative paths")
+    family_create.add_argument("--preferred", help="Preferred stable asset ID or relative path")
+    family_create.add_argument("--json", action="store_true")
+
+    family_add = sub.add_parser("family-add", help="Add assets to an existing family")
+    family_add.add_argument("collection")
+    family_add.add_argument("family_id")
+    family_add.add_argument("assets", nargs="+", help="Stable asset IDs or relative paths")
+    family_add.add_argument("--json", action="store_true")
+
+    family_remove = sub.add_parser("family-remove", help="Remove assets from a family without moving files")
+    family_remove.add_argument("collection")
+    family_remove.add_argument("family_id")
+    family_remove.add_argument("assets", nargs="+", help="Stable asset IDs or relative paths")
+    family_remove.add_argument("--json", action="store_true")
+
+    family_prefer = sub.add_parser("family-prefer", help="Set the preferred member of a family")
+    family_prefer.add_argument("collection")
+    family_prefer.add_argument("family_id")
+    family_prefer.add_argument("asset", nargs="?", help="Stable asset ID or relative path; omit to clear")
+    family_prefer.add_argument("--json", action="store_true")
+
+    family_rename = sub.add_parser("family-rename", help="Rename a family")
+    family_rename.add_argument("collection")
+    family_rename.add_argument("family_id")
+    family_rename.add_argument("name")
+    family_rename.add_argument("--json", action="store_true")
+
+    family_delete = sub.add_parser("family-delete", help="Delete family metadata without deleting assets")
+    family_delete.add_argument("collection")
+    family_delete.add_argument("family_id")
+
     annotations = sub.add_parser("annotations", help="List spatial annotations for one asset")
     annotations.add_argument("collection")
     annotations.add_argument("asset", help="Stable asset ID or relative path")
@@ -404,6 +451,52 @@ def main() -> None:
             asset = resolve_asset(args.collection, args.asset)
             base = args.base_url.rstrip('/')
             print(base + "/c/" + args.collection + "?asset=" + asset["asset_id"])
+        elif args.command == "families":
+            payload = {"version": 1, "collection": args.collection, "families": families_for_collection(args.collection, include_missing=not args.present_only)}
+            if args.json:
+                print(json.dumps(payload, indent=2, sort_keys=True))
+            else:
+                for family in payload["families"]:
+                    preferred = family["preferred_asset_id"] or "-"
+                    print(f"{family['family_id']}\t{family['name']}\tmembers={len(family['members'])}\tpreferred={preferred}")
+        elif args.command == "family-create":
+            assets = [resolve_asset(args.collection, asset) for asset in args.assets]
+            preferred = resolve_asset(args.collection, args.preferred)["asset_id"] if args.preferred else None
+            family = create_family(args.collection, args.name, [asset["asset_id"] for asset in assets], preferred)
+            if args.json:
+                print(json.dumps(family, indent=2, sort_keys=True))
+            else:
+                print(f"Created family {family['name']} ({family['family_id']}) with {len(family['members'])} members")
+        elif args.command == "family-add":
+            assets = [resolve_asset(args.collection, asset) for asset in args.assets]
+            family = add_family_members(args.collection, args.family_id, [asset["asset_id"] for asset in assets])
+            if args.json:
+                print(json.dumps(family, indent=2, sort_keys=True))
+            else:
+                print(f"Updated family {family['name']}: {len(family['members'])} members")
+        elif args.command == "family-remove":
+            assets = [resolve_asset(args.collection, asset) for asset in args.assets]
+            family = remove_family_members(args.collection, args.family_id, [asset["asset_id"] for asset in assets])
+            if args.json:
+                print(json.dumps(family, indent=2, sort_keys=True))
+            else:
+                print("Family deleted (last member removed)" if family is None else f"Updated family {family['name']}: {len(family['members'])} members")
+        elif args.command == "family-prefer":
+            asset_id = resolve_asset(args.collection, args.asset)["asset_id"] if args.asset else None
+            family = set_family_preferred(args.collection, args.family_id, asset_id)
+            if args.json:
+                print(json.dumps(family, indent=2, sort_keys=True))
+            else:
+                print(f"Preferred member for {family['name']}: {family['preferred_asset_id'] or '-'}")
+        elif args.command == "family-rename":
+            family = rename_family(args.collection, args.family_id, args.name)
+            if args.json:
+                print(json.dumps(family, indent=2, sort_keys=True))
+            else:
+                print(f"Renamed family to {family['name']}")
+        elif args.command == "family-delete":
+            family = delete_family(args.collection, args.family_id)
+            print(f"Deleted family metadata {family['name']} ({family['family_id']}); source files were untouched")
         elif args.command == "annotations":
             asset = resolve_asset(args.collection, args.asset)
             rows = annotations_for_asset(args.collection, asset["asset_id"], include_stale=not args.active_only)

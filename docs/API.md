@@ -20,7 +20,7 @@ All endpoints except `/api/health` require configured authentication when Basic 
 
 ### `GET /api/gallery?collection=<slug>&refresh=1`
 
-Returns the browser-oriented current collection, present assets, scan state, and collection review state. `refresh=1` forces a filesystem reconciliation; otherwise a fresh catalog snapshot can be served without recursively walking the source directory.
+Returns the browser-oriented current collection, present assets, variant families, scan state, and collection review state. `refresh=1` forces a filesystem reconciliation; otherwise a fresh catalog snapshot can be served without recursively walking the source directory.
 
 Each asset has a stable `asset_id`. Use that identifier for durable integrations. Relative paths are human-readable locators and can change after a rename.
 
@@ -67,6 +67,18 @@ asset-viewer pending --collection brand-concepts --json
 asset-viewer wait-for-review --collection brand-concepts --timeout 900 --json
 ```
 
+### `GET /api/families?collection=<slug>`
+
+Returns durable variant/version families for a collection. Family membership is keyed by stable asset UUID, so ordinary same-filesystem renames do not break grouping. Each family exposes `preferred_asset_id`, computed `latest_asset_id`, and member review/presence metadata. `present=1` omits missing members.
+
+Equivalent CLI:
+
+```bash
+asset-viewer families brand-concepts --json
+asset-viewer family-create brand-concepts "Logo exploration" concept-v1.png concept-v2.png --json
+asset-viewer family-prefer brand-concepts <family-id> concept-v2.png --json
+```
+
 ### `GET /api/annotations?collection=<slug>&asset_id=<uuid>`
 
 Returns point/region visual feedback for one stable asset ID. Annotation coordinates are normalized to `0..1`, include resolved/stale state, and carry a content SHA-256 binding. `stale=0` can hide feedback invalidated by later content replacement.
@@ -93,6 +105,7 @@ Browser mutations use JSON POST requests and require the session CSRF token from
 - `POST /api/reopen` — reopen a collection
 - `POST /api/undo` — undo the most recent user review/comment change
 - `POST /api/annotation` — create/update/delete point or region feedback
+- `POST /api/family` — create/rename/delete a family, add/remove members, or set/clear its preferred member
 
 Third-party automation should normally use the CLI for mutations unless it deliberately implements the browser security contract. Read APIs and CLI exports are designed as the stable integration surface first.
 
@@ -118,6 +131,7 @@ The generated asset link uses the stable UUID, so ordinary same-filesystem renam
 - Review state follows stable asset identity across detected same-filesystem renames.
 - Non-empty review decisions are bound to a SHA-256 fingerprint (`review_sha256`) of the reviewed bytes. Replacing the bytes at an existing path invalidates the previous status/comment and makes the asset new again—even when size and nanosecond mtime are preserved and the replacement is detected by fingerprint reconciliation.
 - Deleted assets are tombstoned rather than silently removed from manifests.
+- Variant families are review metadata only: grouping never moves, renames, copies, or deletes source files. Family membership follows stable asset IDs across detected renames.
 - Truncated/incomplete scans cannot declare missing files or produce a completed review state.
 
 ## Runtime capabilities
