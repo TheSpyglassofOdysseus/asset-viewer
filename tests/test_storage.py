@@ -1,5 +1,6 @@
 import os
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -35,21 +36,90 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(removed["label"], "My Images")
         self.assertEqual(storage.collections(), [])
 
-    def test_safe_file_blocks_traversal(self):
+    def test_safe_file_blocks_traversal_symlink_and_non_images(self):
         storage.add_collection(str(self.images), "Images")
         inside = self.images / "inside.png"
         inside.write_bytes(b"not-an-image")
-        outside = Path(self.tmp.name) / "outside.txt"
-        outside.write_text("secret")
+        secret = self.images / ".env"
+        secret.write_text("secret")
+        outside = Path(self.tmp.name) / "outside.png"
+        outside.write_bytes(b"outside")
+        link = self.images / "outside-link.png"
+        try:
+            link.symlink_to(outside)
+        except OSError:
+            link = None
         self.assertEqual(storage.safe_file("images", "inside.png"), inside.resolve())
-        self.assertIsNone(storage.safe_file("images", "../outside.txt"))
+        self.assertIsNone(storage.safe_file("images", ".env"))
+        self.assertIsNone(storage.safe_file("images", "../outside.png"))
+        if link is not None:
+            self.assertIsNone(storage.safe_file("images", "outside-link.png"))
 
-    def test_review_round_trip(self):
+    def test_review_round_trip_with_comment(self):
         storage.add_collection(str(self.images), "Images")
-        storage.set_review("images", "frame.png", "approved")
+        storage.set_review("images", "frame.png", "approved", comment="Ship it")
         self.assertEqual(storage.reviews()["images"]["frame.png"], "approved")
+        manifest = storage.review_manifest("images")
+        self.assertEqual(manifest["items"][0]["comment"], "Ship it")
+        self.assertEqual(manifest["counts"]["approved"], 1)
+        self.assertIsNotNone(manifest["items"][0]["seen_at"])
         storage.set_review("images", "frame.png", "")
         self.assertNotIn("frame.png", storage.reviews()["images"])
+
+    def test_batch_review_and_new_tracking(self):
+        storage.add_collection(str(self.images), "Images")
+        storage.ensure_assets("images", ["a.png", "b.png", "c.png"])
+        manifest = storage.review_manifest("images")
+        self.assertEqual(manifest["counts"]["new"], 3)
+        storage.mark_seen("images", ["a.png"])
+        storage.set_reviews_batch("images", ["b.png", "c.png"], "maybe")
+        manifest = storage.review_manifest("images")
+        self.assertEqual(manifest["counts"]["maybe"], 2)
+        self.assertEqual(manifest["counts"]["new"], 0)
+        new_only = storage.review_manifest("images", "new")
+        self.assertEqual(new_only["counts"]["total"], 0)
+
+    def test_comment_is_limited_and_status_filter_works(self):
+        storage.add_collection(str(self.images), "Images")
+        storage.set_review("images", "approved.png", "approved", comment="x" * 12000)
+        storage.set_review("images", "rejected.png", "rejected")
+        approved = storage.review_manifest("images", "approved")
+        self.assertEqual(approved["counts"]["total"], 1)
+        self.assertEqual(len(approved["items"][0]["comment"]), 10000)
+
+    def test_concurrent_review_writes_do_not_lose_rows(self):
+        storage.add_collection(str(self.images), "Images")
+        errors = []
+
+        def write(index):
+            try:
+                storage.set_review("images", f"frame-{index}.png", "approved", comment=str(index))
+            except Exception as exc:  # pragma: no cover - failure detail only
+                errors.append(exc)
+
+        threads = [threading.Thread(target=write, args=(i,)) for i in range(20)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(errors, [])
+        manifest = storage.review_manifest("images")
+        self.assertEqual(manifest["counts"]["approved"], 20)
+
+    def test_legacy_reviews_migrate_to_sqlite(self):
+        storage.add_collection(str(self.images), "Images")
+        legacy = storage.legacy_reviews_path()
+        legacy.write_text('{"images":{"old.png":"maybe"}}')
+        self.assertEqual(storage.reviews()["images"]["old.png"], "maybe")
+        self.assertTrue(storage.database_path().exists())
+        self.assertTrue(legacy.with_name("reviews.json.migrated").exists())
+
+    def test_state_files_are_private(self):
+        storage.add_collection(str(self.images), "Images")
+        storage.set_review("images", "frame.png", "approved")
+        self.assertEqual(storage.data_dir().stat().st_mode & 0o077, 0)
+        self.assertEqual(storage.registry_path().stat().st_mode & 0o077, 0)
+        self.assertEqual(storage.database_path().stat().st_mode & 0o077, 0)
 
 
 if __name__ == "__main__":

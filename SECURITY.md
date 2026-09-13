@@ -2,11 +2,11 @@
 
 ## Deployment model
 
-Asset Viewer is designed to run on a trusted machine and bind to `127.0.0.1` by default. It does **not** currently implement user authentication or authorization.
+Asset Viewer is designed to run on a trusted machine and bind to `127.0.0.1` by default. Optional HTTP Basic authentication is available through `ASSET_VIEWER_PASSWORD`; a private network or authenticated reverse proxy remains the recommended outer access boundary.
 
-If you need remote access, place Asset Viewer behind a trusted access boundary such as a VPN/private network or an authenticated reverse proxy. Do not expose the raw application listener directly to the public internet.
+If you need remote access, place Asset Viewer behind a trusted access boundary such as a VPN/private network or an authenticated reverse proxy. Configure each browser-facing hostname with `--trusted-host`; unexpected Host headers are rejected. Do not expose the raw application listener directly to the public internet.
 
-Registered folders should contain content you trust. In particular, SVG is a web-capable format and should be treated as active/untrusted content when sourced from unknown parties.
+Asset Viewer treats SVG as active content: gallery previews use inert placeholders and opening an SVG original is forced to download as an attachment rather than rendered inline. Registered folders should still be treated as potentially hostile input and kept within the documented image/resource limits.
 
 ## Reporting a vulnerability
 

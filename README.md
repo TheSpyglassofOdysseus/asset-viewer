@@ -32,7 +32,7 @@ No import job. No duplicate asset library. No requirement to upload the batch to
 - **Recursive discovery** of PNG, JPEG, WebP, GIF, AVIF, BMP, and SVG assets.
 - **Local-first security posture** — binds to `127.0.0.1` by default.
 - **Agent-friendly CLI** that is easy to call from scripts and repo instructions.
-- **Minimal stack** — Python, Pillow, and a small browser UI. No database required.
+- **Minimal stack** — Python, Pillow, SQLite from the standard library, and a small browser UI. No external database service required.
 
 ## Quick start
 
@@ -76,6 +76,10 @@ The demo command creates a small set of synthetic sample assets and registers th
 asset-viewer add PATH [LABEL]      Register an image folder
 asset-viewer remove SLUG|PATH      Remove a collection
 asset-viewer list                  List registered folders
+asset-viewer scan [--collection]   Discover/refresh asset metadata
+asset-viewer reviews --collection  Read review state (add --json for agents)
+asset-viewer export-manifest       Export review state as JSON
+asset-viewer doctor                Check state and deployment prerequisites
 asset-viewer serve                 Start the web viewer
 asset-viewer demo                  Create/register synthetic demo assets
 ```
@@ -118,7 +122,7 @@ By default it stores only:
 ```text
 ~/.local/share/asset-viewer/
 ├── collections.json    # registered source folders
-└── reviews.json        # approved / maybe / rejected state
+└── asset-viewer.db     # transactional review state, notes, seen/new state
 
 ~/.cache/asset-viewer/
 └── *.jpg               # generated thumbnails
@@ -130,13 +134,17 @@ Deleting Asset Viewer does not delete your project images.
 
 ## Remote access and security
 
-**Asset Viewer does not include authentication.** It binds to localhost by default on purpose.
+Asset Viewer binds to localhost by default. For remote/private deployments it also supports optional HTTP Basic authentication with `ASSET_VIEWER_PASSWORD`, but an authenticated reverse proxy/private network remains the preferred outer boundary.
 
-For remote use, keep the application on `127.0.0.1` and put it behind an authenticated/private reverse proxy such as Tailscale Serve, Caddy with authentication, nginx behind your VPN, or an equivalent trusted access layer.
+For remote use, keep the application on `127.0.0.1` and put it behind an authenticated/private reverse proxy such as Tailscale Serve, Caddy with authentication, nginx behind your VPN, or an equivalent trusted access layer. Reverse-proxy deployments must explicitly allow the browser-facing hostname, for example:
 
-Do not expose `asset-viewer serve --host 0.0.0.0` directly to the public internet unless you have added an appropriate authentication boundary in front of it.
+```bash
+ASSET_VIEWER_PASSWORD='use-a-secret-manager' asset-viewer serve --host 127.0.0.1 --trusted-host gallery.example.com
+```
 
-See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and [SECURITY.md](SECURITY.md).
+Non-loopback binds are rejected unless at least one `--trusted-host` is supplied. Do not expose the raw listener directly to the public internet unless you have added an appropriate authentication boundary in front of it.
+
+See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), [SECURITY.md](SECURITY.md), and the [2026-09-13 security audit](docs/SECURITY_AUDIT_2026-09-13.md).
 
 ## Project philosophy
 
@@ -170,7 +178,11 @@ asset-viewer serve --port 8160
 
 ## Roadmap
 
-Near-term directions include optional comments/notes, collection-level sorting, lightweight compare mode, export of approval manifests, pluggable authentication, and a small JSON API intended for agent automation.
+The roadmap is organized around a deliberate progression: **production hardening → human/agent feedback → agent-native automation → serious creative review → collaboration**.
+
+The highest-value product step after hardening is a machine-readable review manifest: humans should be able to approve, reject, or comment visually, and agents should be able to consume that decision without scraping the UI or parsing a chat transcript.
+
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the phased feature/benefit analysis and roadmap.
 
 Issues and focused pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
