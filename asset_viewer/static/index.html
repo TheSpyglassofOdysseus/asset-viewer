@@ -17,6 +17,7 @@
       <option value="all">All images</option><option value="new">New / unseen</option><option value="unreviewed">Unreviewed</option><option value="approved">Approved</option><option value="maybe">Maybe</option><option value="rejected">Rejected</option>
     </select>
     <select id="sort" aria-label="Sort assets"><option value="newest">Newest</option><option value="oldest">Oldest</option><option value="name">Name</option><option value="status">Review status</option><option value="size">File size</option><option value="resolution">Resolution</option></select>
+    <button id="selectAll" type="button" title="Select all images in the current filtered view">Select all</button>
     <button id="reviewComplete" type="button">Review status</button>
     <button id="refresh" type="button">Refresh</button>
   </div>
@@ -33,7 +34,7 @@
     </div>
     <div class="meta">
       <div class="identity"><strong id="filename"></strong><span id="details"></span><span id="previewNotice" class="preview-notice hidden"></span></div>
-      <div class="review"><button class="approve" data-status="approved" type="button">✓ Approve</button><button class="maybe" data-status="maybe" type="button">? Maybe</button><button class="reject" data-status="rejected" type="button">× Reject</button><button data-status="" type="button">Clear</button><button id="undoReview" type="button">↶ Undo</button><button id="showHistory" type="button">History</button><button id="copyPath" type="button">Copy path</button><button id="copyReviewLink" type="button">Copy review link</button><a id="original" target="_blank" rel="noreferrer">Open original</a></div>
+      <div class="review"><span id="reviewDecision" class="review-decision">Unreviewed</span><button class="approve" data-status="approved" type="button" aria-pressed="false">✓ Approve</button><button class="maybe" data-status="maybe" type="button" aria-pressed="false">? Maybe</button><button class="reject" data-status="rejected" type="button" aria-pressed="false">× Reject</button><button data-status="" type="button" aria-pressed="true">Clear</button><button id="undoReview" type="button">↶ Undo</button><button id="showHistory" type="button">History</button><button id="copyPath" type="button">Copy path</button><button id="copyReviewLink" type="button">Copy review link</button><a id="original" target="_blank" rel="noreferrer">Open original</a></div>
     </div>
     <div id="familyRow" class="family-row hidden"><div><strong id="familyName"></strong><span id="familyMeta"></span></div><div class="family-actions"><button id="compareFamily" type="button">Compare family</button><button id="setPreferred" type="button">Set preferred</button><button id="leaveFamily" type="button">Leave family</button></div></div>
     <div class="comment-row"><textarea id="comment" maxlength="10000" placeholder="Review note for the next agent…" aria-label="Review note"></textarea><button id="saveComment" type="button">Save note</button></div>

@@ -2,6 +2,15 @@
 
 All notable changes to Asset Viewer will be documented here.
 
+## 0.6.2 — 2026-09-13
+
+Selection workflow patch.
+
+- Add a persistent **Select all** button to the gallery toolbar.
+- Select all acts on the current filtered/search view, so review batches can be narrowed first and then selected in one click.
+- Disable the control when the current view is empty or already fully selected; existing **Clear selection** remains the explicit reset.
+- Make the enlarged review view show a persistent decision indicator and visibly latch the active **Approve**, **Maybe**, **Reject**, or **Clear** button.
+
 ## 0.6.1 — 2026-09-13
 
 Public-release sign-off patch.

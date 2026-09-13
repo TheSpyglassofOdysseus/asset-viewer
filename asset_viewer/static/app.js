@@ -161,6 +161,22 @@ function applyFilter() {
       toggleSelection(Number(button.dataset.select));
     };
   });
+  updateSelectAll();
+}
+
+function updateSelectAll() {
+  const button = $('#selectAll');
+  const visible = state.filtered.map(keyFor);
+  const allVisibleSelected = visible.length > 0 && visible.every(key => state.selected.has(key));
+  button.disabled = visible.length === 0 || allVisibleSelected;
+  button.textContent = allVisibleSelected ? 'All selected' : 'Select all';
+  button.title = visible.length ? `Select all ${visible.length} images in the current filtered view` : 'No images in the current view';
+}
+
+function selectAllVisible() {
+  state.filtered.forEach(asset => state.selected.add(keyFor(asset)));
+  applyFilter();
+  updateBulk();
 }
 
 function toggleSelection(index) {
@@ -177,6 +193,7 @@ function updateBulk() {
   $('#selectedCount').textContent = `${count} selected`;
   $('#compare').disabled = count < 2;
   $('#groupVariants').disabled = count < 2;
+  updateSelectAll();
 }
 
 function updateReviewState() {
@@ -222,6 +239,19 @@ function familyById(familyId) {
   return state.families.find(family => family.family_id === familyId) || null;
 }
 
+function renderReviewDecision(asset) {
+  const status = asset?.status || '';
+  const labels = {approved: 'Approved', maybe: 'Maybe', rejected: 'Rejected', '': 'Unreviewed'};
+  const indicator = $('#reviewDecision');
+  indicator.textContent = labels[status] || status;
+  indicator.className = `review-decision ${status ? `decision-${status}` : 'decision-unreviewed'}`;
+  document.querySelectorAll('.review button[data-status]').forEach(button => {
+    const selected = button.dataset.status === status;
+    button.classList.toggle('decision-active', selected);
+    button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+  });
+}
+
 function renderFamilyRow(asset) {
   const row = $('#familyRow');
   if (!asset || !asset.family_id) {
@@ -249,6 +279,7 @@ function openAt(index, updateUrl = true) {
   $('#details').textContent = `${asset.rel} · ${asset.width || '?'}×${asset.height || '?'} · ${formatBytes(asset.size)}`;
   $('#original').href = asset.file;
   $('#comment').value = asset.comment || '';
+  renderReviewDecision(asset);
   renderFamilyRow(asset);
   $('#historyPanel').classList.add('hidden');
   const notice = $('#previewNotice');
@@ -325,6 +356,7 @@ async function undoReview() {
   const asset = state.filtered[state.current];
   const data = await apiPost('/api/undo', {collection: asset.collection, asset_id: asset.asset_id});
   updateLocal(asset.asset_id || asset.rel, {status: data.result.status, comment: data.result.comment});
+  renderReviewDecision(state.images.find(item => keyFor(item) === keyFor(asset)));
   $('#comment').value = data.result.comment;
   applyFilter();
   await refreshReviewState();
@@ -787,6 +819,7 @@ $('#filter').onchange = applyFilter;
 $('#sort').onchange = applyFilter;
 $('#search').oninput = applyFilter;
 $('#refresh').onclick = () => load(state.active, true).catch(showError);
+$('#selectAll').onclick = selectAllVisible;
 $('#reviewComplete').onclick = () => toggleComplete().catch(showError);
 $('#close').onclick = close;
 $('#prev').onclick = () => step(-1);
