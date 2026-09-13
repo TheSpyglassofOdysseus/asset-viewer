@@ -18,10 +18,10 @@ Asset Viewer is the **review plane**, not the storage plane. Projects and creati
 
 Target: make private/server deployments robust enough to recommend confidently.
 
-- Replace or wrap the development `http.server` listener with a production serving layer.
+- [x] Waitress is the default production serving layer; the stdlib server is explicit development-only fallback.
 - [x] Review/comment/seen state and the asset catalog are transactional SQLite with migrations, stable UUID asset IDs, and SHA-256-bound non-empty review decisions.
 - [~] Durable catalog + cached reads, tombstones, content-change invalidation, and rename reconciliation are implemented; a filesystem watcher remains open for immediate discovery without explicit/TTL rescans.
-- [~] Image byte/pixel/scan limits and bounded concurrent decoding are implemented; process-isolated preview workers remain open.
+- [x] Image byte/pixel/scan limits, bounded concurrency, disposable preview/metadata worker processes, timeout termination, and best-effort POSIX memory/file limits are implemented.
 - [x] SVG previews are inert JPEG placeholders and originals are forced downloads.
 - [~] CSRF/origin protections and trusted hosts are implemented; direct non-loopback serving now requires Basic auth unless an operator explicitly acknowledges another trusted access boundary. Stronger proxy identity/session auth remains open.
 - [~] Regression coverage now includes traversal, symlinks, Host/Origin, CSRF, SVG, non-image disclosure, concurrent writes, and permissions; fuzz/malformed-image/request-budget coverage remains open.
@@ -79,14 +79,14 @@ The intended loop is:
 
 Target: support high-volume visual iteration without becoming an editor or DAM.
 
-- Zoom/pan and fit modes; linked transforms across comparison panes remain open.
+- [x] Zoom/pan with linked or independent transforms across comparison panes.
 - [~] Filename/path search is implemented; metadata search remains open.
 - [~] Sort by time/name/status/file-size/resolution is implemented; type/generation-metadata sorting remains open.
 - Prompt/model/generation metadata display where available.
 - Contact-sheet export.
-- Pinned/anchored annotations with normalized image coordinates and agent-readable events. **Highest-value next human-feedback feature.**
-- [x] Side-by-side, overlay, and difference comparison views; synchronized zoom/pan remains open.
-- Version/variant families. **Highest-value structural creative feature after pinned annotations.**
+- [x] Point/region annotations with normalized coordinates, resolve/reopen state, content-bound staleness, manifest/API/CLI exposure, and agent-readable events.
+- [x] Side-by-side, overlay, and difference comparison views with linked/independent zoom and pan.
+- Version/variant families. **Highest-value next product feature.**
 - Nested collection navigation.
 - [~] Per-asset review history and ordered machine event feed are implemented; human-facing collection activity view remains open.
 - Export/copy approved sets without changing source-of-truth semantics.

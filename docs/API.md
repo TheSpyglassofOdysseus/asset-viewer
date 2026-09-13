@@ -67,6 +67,17 @@ asset-viewer pending --collection brand-concepts --json
 asset-viewer wait-for-review --collection brand-concepts --timeout 900 --json
 ```
 
+### `GET /api/annotations?collection=<slug>&asset_id=<uuid>`
+
+Returns point/region visual feedback for one stable asset ID. Annotation coordinates are normalized to `0..1`, include resolved/stale state, and carry a content SHA-256 binding. `stale=0` can hide feedback invalidated by later content replacement.
+
+Equivalent CLI:
+
+```bash
+asset-viewer annotations brand-concepts <asset-id> --json
+asset-viewer annotate brand-concepts <asset-id> point 0.42 0.61 "Remove this object"
+```
+
 ### `GET /api/review-history`
 
 Accepts `collection` plus `asset_id` (preferred) or `rel`. Returns the asset's decision/comment history, including undone actions and system content-change events.
@@ -81,6 +92,7 @@ Browser mutations use JSON POST requests and require the session CSRF token from
 - `POST /api/complete` — explicitly complete a fully reviewed collection
 - `POST /api/reopen` — reopen a collection
 - `POST /api/undo` — undo the most recent user review/comment change
+- `POST /api/annotation` — create/update/delete point or region feedback
 
 Third-party automation should normally use the CLI for mutations unless it deliberately implements the browser security contract. Read APIs and CLI exports are designed as the stable integration surface first.
 
@@ -107,3 +119,9 @@ The generated asset link uses the stable UUID, so ordinary same-filesystem renam
 - Non-empty review decisions are bound to a SHA-256 fingerprint (`review_sha256`) of the reviewed bytes. Replacing the bytes at an existing path invalidates the previous status/comment and makes the asset new again—even when size and nanosecond mtime are preserved and the replacement is detected by fingerprint reconciliation.
 - Deleted assets are tombstoned rather than silently removed from manifests.
 - Truncated/incomplete scans cannot declare missing files or produce a completed review state.
+
+## Runtime capabilities
+
+`asset-viewer serve` uses Waitress by default. `GET /api/capabilities` reports `production_wsgi_server`, process-isolated previews, compare/annotation support, and the effective safety/resource limits. The legacy stdlib server exists only for `--development-server`.
+
+When embedding the WSGI application in multiple OS processes, provide a shared `ASSET_VIEWER_CSRF_TOKEN` to keep browser mutation tokens consistent across workers.

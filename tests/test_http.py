@@ -236,6 +236,67 @@ class HttpSecurityTests(unittest.TestCase):
         events = json.loads(body)["events"]
         self.assertTrue(any(event["asset_id"] == sample["asset_id"] and event["action"] == "review" for event in events))
 
+    def test_spatial_annotation_api_and_manifest(self):
+        status, _, body = self.request("GET", "/api/gallery?collection=samples&refresh=1")
+        self.assertEqual(status, 200)
+        gallery = json.loads(body)
+        sample = next(item for item in gallery["images"] if item["rel"] == "sample.png")
+        create = json.dumps({
+            "collection": "samples", "asset_id": sample["asset_id"], "action": "create",
+            "kind": "region", "x": 0.1, "y": 0.2, "w": 0.3, "h": 0.4, "text": "Tighten this area",
+        })
+        status, _, body = self.request(
+            "POST", "/api/annotation", origin=self.same_origin(), body=create, csrf="test-csrf-token"
+        )
+        self.assertEqual(status, 201)
+        annotation = json.loads(body)["annotation"]
+        self.assertEqual(annotation["kind"], "region")
+        self.assertEqual(annotation["text"], "Tighten this area")
+
+        status, _, body = self.request(
+            "GET", f"/api/annotations?collection=samples&asset_id={sample['asset_id']}"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(len(json.loads(body)["annotations"]), 1)
+
+        update = json.dumps({
+            "collection": "samples", "action": "update",
+            "annotation_id": annotation["annotation_id"], "resolved": True, "text": "Fixed",
+        })
+        status, _, body = self.request(
+            "POST", "/api/annotation", origin=self.same_origin(), body=update, csrf="test-csrf-token"
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(json.loads(body)["annotation"]["resolved"])
+
+        status, _, body = self.request("GET", "/api/reviews?collection=samples")
+        self.assertEqual(status, 200)
+        item = next(item for item in json.loads(body)["items"] if item["asset_id"] == sample["asset_id"])
+        self.assertEqual(item["annotations"][0]["annotation_id"], annotation["annotation_id"])
+
+        delete = json.dumps({
+            "collection": "samples", "action": "delete", "annotation_id": annotation["annotation_id"],
+        })
+        status, _, _ = self.request(
+            "POST", "/api/annotation", origin=self.same_origin(), body=delete, csrf="test-csrf-token"
+        )
+        self.assertEqual(status, 200)
+
+    def test_annotation_api_rejects_invalid_geometry_and_missing_csrf(self):
+        _, _, body = self.request("GET", "/api/gallery?collection=samples&refresh=1")
+        sample = next(item for item in json.loads(body)["images"] if item["rel"] == "sample.png")
+        payload = json.dumps({
+            "collection": "samples", "asset_id": sample["asset_id"], "action": "create",
+            "kind": "region", "x": 0.9, "y": 0.9, "w": 0.3, "h": 0.3,
+        })
+        status, _, _ = self.request("POST", "/api/annotation", origin=self.same_origin(), body=payload)
+        self.assertEqual(status, 403)
+        status, _, body = self.request(
+            "POST", "/api/annotation", origin=self.same_origin(), body=payload, csrf="test-csrf-token"
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("outside", json.loads(body)["error"])
+
     def test_review_preview_is_bounded_and_private(self):
         large = self.images / "large.png"
         Image.new("RGB", (3000, 2200), (4, 5, 6)).save(large)

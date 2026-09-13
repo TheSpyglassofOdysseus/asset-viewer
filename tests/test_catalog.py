@@ -237,6 +237,77 @@ class CatalogTests(unittest.TestCase):
         missing = next(row for row in storage.catalog_records("images", present_only=False) if row["rel"] == "b.png")
         self.assertFalse(missing["present"])
 
+    def test_spatial_annotations_follow_stable_identity_across_rename(self):
+        path = self.make_image("annotated.png")
+        rows, _ = scan_collection("images", force=True)
+        asset_id = rows[0]["asset_id"]
+        point = storage.create_annotation(
+            "images", asset_id, "point", 0.25, 0.4, text="Move the mark left"
+        )
+        self.assertRegex(point["content_sha256"], r"^[0-9a-f]{64}$")
+        region = storage.create_annotation(
+            "images", asset_id, "region", 0.5, 0.2, w=0.3, h=0.4, text="Reduce this block"
+        )
+        self.assertEqual(point["kind"], "point")
+        self.assertEqual(region["kind"], "region")
+        self.assertEqual(len(storage.annotations_for_asset("images", asset_id)), 2)
+
+        path.rename(self.images / "renamed.png")
+        rows, _ = scan_collection("images", force=True)
+        self.assertEqual(rows[0]["asset_id"], asset_id)
+        annotations = storage.annotations_for_asset("images", asset_id)
+        self.assertEqual([item["text"] for item in annotations], ["Move the mark left", "Reduce this block"])
+        self.assertFalse(any(item["stale"] for item in annotations))
+
+    def test_content_change_marks_spatial_annotations_stale(self):
+        path = self.make_image("stale.png")
+        rows, _ = scan_collection("images", force=True)
+        asset_id = rows[0]["asset_id"]
+        annotation = storage.create_annotation("images", asset_id, "point", 0.5, 0.5, text="Original detail")
+        Image.new("RGB", (80, 48), (99, 88, 77)).save(path)
+        scan_collection("images", force=True)
+        refreshed = storage.annotations_for_asset("images", asset_id)
+        self.assertEqual(refreshed[0]["annotation_id"], annotation["annotation_id"])
+        self.assertTrue(refreshed[0]["stale"])
+        manifest = storage.review_manifest("images")
+        self.assertTrue(manifest["items"][0]["annotations"][0]["stale"])
+
+    def test_annotation_fingerprint_detects_same_size_same_mtime_replacement(self):
+        path = self.images / "annotation-fingerprint.bmp"
+        Image.new("RGB", (64, 48), (10, 20, 30)).save(path)
+        rows, _ = scan_collection("images", force=True)
+        asset_id = rows[0]["asset_id"]
+        created = storage.create_annotation("images", asset_id, "point", 0.4, 0.5, text="This exact pixel area")
+        before = path.stat()
+
+        Image.new("RGB", (64, 48), (90, 80, 70)).save(path)
+        self.assertEqual(before.st_size, path.stat().st_size)
+        os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+        rows, meta = scan_collection("images", force=True)
+        self.assertEqual(meta["changed"], 1)
+        annotations = storage.annotations_for_asset("images", asset_id)
+        self.assertEqual(annotations[0]["annotation_id"], created["annotation_id"])
+        self.assertTrue(annotations[0]["stale"])
+        event = next(e for e in storage.review_events_since("images")["events"] if e["action"] == "content_changed")
+        self.assertTrue(event["details"]["annotation_hash_mismatch"])
+
+    def test_annotation_update_delete_and_validation(self):
+        self.make_image("notes.png")
+        rows, _ = scan_collection("images", force=True)
+        asset_id = rows[0]["asset_id"]
+        with self.assertRaisesRegex(ValueError, "outside"):
+            storage.create_annotation("images", asset_id, "region", 0.9, 0.9, w=0.2, h=0.2)
+        created = storage.create_annotation("images", asset_id, "point", 0.1, 0.2, text="first")
+        updated = storage.update_annotation("images", created["annotation_id"], text="done", resolved=True)
+        self.assertEqual(updated["text"], "done")
+        self.assertTrue(updated["resolved"])
+        events = storage.review_events_since("images")["events"]
+        self.assertIn("annotation_created", [event["action"] for event in events])
+        self.assertIn("annotation_updated", [event["action"] for event in events])
+        deleted = storage.delete_annotation("images", created["annotation_id"])
+        self.assertEqual(deleted["annotation_id"], created["annotation_id"])
+        self.assertEqual(storage.annotations_for_asset("images", asset_id), [])
+
     def test_catalog_handles_large_synthetic_collection_without_path_scans(self):
         discoveries = [
             {"rel": f"frames/{i:04d}.png", "device": 1, "inode": 1000 + i, "size": 2048 + i, "mtime_ns": 1_000_000 + i, "width": 1024, "height": 768, "preview_error": None}

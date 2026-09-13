@@ -82,7 +82,8 @@
         "rel",
         "status",
         "comment",
-        "present"
+        "present",
+        "annotations"
       ],
       "properties": {
         "asset_id": {
@@ -167,9 +168,99 @@
             "null"
           ],
           "pattern": "^[0-9a-f]{64}$"
+        },
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/annotation"
+          }
         }
       },
       "additionalProperties": true
+    },
+    "annotation": {
+      "type": "object",
+      "required": [
+        "annotation_id",
+        "asset_id",
+        "collection",
+        "kind",
+        "x",
+        "y",
+        "w",
+        "h",
+        "text",
+        "resolved",
+        "stale",
+        "created_at",
+        "updated_at",
+        "content_sha256"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "annotation_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "asset_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "collection": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "point",
+            "region"
+          ]
+        },
+        "x": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "y": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "w": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "h": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 4000
+        },
+        "resolved": {
+          "type": "boolean"
+        },
+        "stale": {
+          "type": "boolean"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "content_sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
     }
   },
   "additionalProperties": true

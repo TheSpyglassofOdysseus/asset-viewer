@@ -81,6 +81,26 @@ class CliWorkflowTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), f"https://viewer.example.test/c/images?asset={asset['asset_id']}")
 
+    def test_spatial_annotation_cli(self):
+        from asset_viewer.app import scan_collection
+        scan_collection("images", force=True)
+        asset = next(row for row in storage.catalog_records("images") if row["rel"] == "a.png")
+        created = self.run_cli(
+            "annotate", "images", asset["asset_id"], "region", "0.1", "0.2", "tighten",
+            "--width", "0.3", "--height", "0.4", "--json",
+        )
+        self.assertEqual(created.returncode, 0, created.stderr)
+        annotation = json.loads(created.stdout)
+        self.assertEqual(annotation["kind"], "region")
+        listed = self.run_cli("annotations", "images", asset["asset_id"], "--json")
+        self.assertEqual(listed.returncode, 0, listed.stderr)
+        self.assertEqual(json.loads(listed.stdout)["annotations"][0]["text"], "tighten")
+        updated = self.run_cli("annotation-update", "images", annotation["annotation_id"], "--resolve", "--json")
+        self.assertEqual(updated.returncode, 0, updated.stderr)
+        self.assertTrue(json.loads(updated.stdout)["resolved"])
+        deleted = self.run_cli("annotation-delete", "images", annotation["annotation_id"])
+        self.assertEqual(deleted.returncode, 0, deleted.stderr)
+
     def test_events_and_wait_for_review_cli(self):
         storage.set_review("images", "a.png", "approved")
         events = self.run_cli("events", "--collection", "images", "--json")
@@ -94,6 +114,16 @@ class CliWorkflowTests(unittest.TestCase):
         done = self.run_cli("wait-for-review", "--collection", "images", "--timeout", "0", "--no-scan", "--json")
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertFalse(json.loads(done.stdout)["pending"])
+
+    def test_cache_status_and_prune_cli(self):
+        cache = storage.cache_dir()
+        (cache / "thumb-one.jpg").write_bytes(b"x" * 10)
+        status = self.run_cli("cache", "status", "--json")
+        self.assertEqual(status.returncode, 0, status.stderr)
+        self.assertEqual(json.loads(status.stdout)["files"], 1)
+        pruned = self.run_cli("cache", "prune", "--max-mb", "0", "--max-age-days", "0", "--json")
+        self.assertEqual(pruned.returncode, 0, pruned.stderr)
+        self.assertEqual(json.loads(pruned.stdout)["files"], 1)
 
     def test_history_and_undo_cli(self):
         storage.set_review("images", "a.png", "maybe", comment="first")

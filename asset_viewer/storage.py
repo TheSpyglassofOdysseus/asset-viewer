@@ -132,6 +132,26 @@ def _connect() -> sqlite3.Connection:
                 completed_at TEXT,
                 updated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS annotations (
+                annotation_id TEXT PRIMARY KEY,
+                asset_id TEXT NOT NULL,
+                collection TEXT NOT NULL,
+                kind TEXT NOT NULL CHECK(kind IN ('point', 'region')),
+                x REAL NOT NULL CHECK(x >= 0 AND x <= 1),
+                y REAL NOT NULL CHECK(y >= 0 AND y <= 1),
+                w REAL NOT NULL DEFAULT 0 CHECK(w >= 0 AND w <= 1),
+                h REAL NOT NULL DEFAULT 0 CHECK(h >= 0 AND h <= 1),
+                text TEXT NOT NULL DEFAULT '',
+                resolved INTEGER NOT NULL DEFAULT 0,
+                stale INTEGER NOT NULL DEFAULT 0,
+                content_sha256 TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_annotations_asset
+                ON annotations(asset_id, stale, resolved, created_at);
+            CREATE INDEX IF NOT EXISTS idx_annotations_collection
+                ON annotations(collection, created_at);
             CREATE TABLE IF NOT EXISTS catalog_state (
                 collection TEXT PRIMARY KEY,
                 generation INTEGER NOT NULL DEFAULT 0,
@@ -212,6 +232,10 @@ def _ensure_catalog_schema(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_review_events_asset_id ON review_events(asset_id, id DESC)")
+
+    annotation_columns = {row["name"] for row in conn.execute("PRAGMA table_info(annotations)")}
+    if "content_sha256" not in annotation_columns:
+        conn.execute("ALTER TABLE annotations ADD COLUMN content_sha256 TEXT")
 
     state_columns = {row["name"] for row in conn.execute("PRAGMA table_info(catalog_state)")}
     state_additions = {
@@ -416,7 +440,12 @@ def catalog_records(collection: str, present_only: bool = True) -> list[dict[str
     query = """
         SELECT asset_id, collection, rel, status, comment, first_seen_at, seen_at, updated_at,
                device, inode, size, mtime_ns, width, height, preview_error, present, scan_generation,
-               content_changed_at, missing_at, review_sha256
+               content_changed_at, missing_at, review_sha256,
+               (SELECT COUNT(*) FROM annotations an
+                WHERE an.asset_id=assets.asset_id AND an.stale=0 AND an.resolved=0) AS annotation_count,
+               (SELECT an.content_sha256 FROM annotations an
+                WHERE an.asset_id=assets.asset_id AND an.stale=0 AND an.content_sha256 IS NOT NULL
+                ORDER BY an.created_at LIMIT 1) AS annotation_sha256
         FROM assets WHERE collection=?
     """
     args: list[Any] = [collection]
@@ -520,7 +549,7 @@ def reconcile_catalog(
             metadata_known = target["size"] is not None and target["mtime_ns"] is not None
             content_changed = (
                 metadata_known and (int(target["size"]) != size or int(target["mtime_ns"]) != mtime_ns)
-            ) or bool(item.get("review_hash_mismatch"))
+            ) or bool(item.get("review_hash_mismatch")) or bool(item.get("annotation_hash_mismatch"))
             if not was_present:
                 _record_system_event(conn, collection, rel, asset_id, "asset_restored", now)
                 restored += 1
@@ -534,10 +563,15 @@ def reconcile_catalog(
                     """,
                     (now, now, asset_id),
                 )
+                conn.execute(
+                    "UPDATE annotations SET stale=1, updated_at=? WHERE asset_id=? AND stale=0",
+                    (now, asset_id),
+                )
                 _record_system_event(
                     conn, collection, rel, asset_id, "content_changed", now,
                     {"old_size": target["size"], "new_size": size, "old_mtime_ns": target["mtime_ns"], "new_mtime_ns": mtime_ns,
-                     "review_hash_mismatch": bool(item.get("review_hash_mismatch"))},
+                     "review_hash_mismatch": bool(item.get("review_hash_mismatch")),
+                     "annotation_hash_mismatch": bool(item.get("annotation_hash_mismatch"))},
                     old_status=old_status, new_status="", old_comment=old_comment, new_comment="",
                 )
                 changed += 1
@@ -582,6 +616,182 @@ def reconcile_catalog(
              added + restored, changed, removed, renamed),
         )
     return catalog_state(collection)
+
+def _annotation_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "annotation_id": str(row["annotation_id"]),
+        "asset_id": str(row["asset_id"]),
+        "collection": str(row["collection"]),
+        "kind": str(row["kind"]),
+        "x": float(row["x"]),
+        "y": float(row["y"]),
+        "w": float(row["w"]),
+        "h": float(row["h"]),
+        "text": str(row["text"] or ""),
+        "resolved": bool(row["resolved"]),
+        "stale": bool(row["stale"]),
+        "content_sha256": row["content_sha256"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def annotations_for_asset(collection: str, asset_id: str, *, include_stale: bool = True) -> list[dict[str, Any]]:
+    with _connection() as conn:
+        if include_stale:
+            rows = conn.execute(
+                """
+                SELECT annotation_id, asset_id, collection, kind, x, y, w, h, text, resolved, stale, content_sha256, created_at, updated_at
+                FROM annotations WHERE collection=? AND asset_id=? ORDER BY created_at, annotation_id
+                """,
+                (collection, asset_id),
+            )
+        else:
+            rows = conn.execute(
+                """
+                SELECT annotation_id, asset_id, collection, kind, x, y, w, h, text, resolved, stale, content_sha256, created_at, updated_at
+                FROM annotations WHERE collection=? AND asset_id=? AND stale=0 ORDER BY created_at, annotation_id
+                """,
+                (collection, asset_id),
+            )
+        return [_annotation_row(row) for row in rows]
+
+
+def annotations_for_collection(collection: str, *, include_stale: bool = True) -> dict[str, list[dict[str, Any]]]:
+    out: dict[str, list[dict[str, Any]]] = {}
+    with _connection() as conn:
+        if include_stale:
+            rows = conn.execute(
+                """
+                SELECT annotation_id, asset_id, collection, kind, x, y, w, h, text, resolved, stale, content_sha256, created_at, updated_at
+                FROM annotations WHERE collection=? ORDER BY created_at, annotation_id
+                """,
+                (collection,),
+            )
+        else:
+            rows = conn.execute(
+                """
+                SELECT annotation_id, asset_id, collection, kind, x, y, w, h, text, resolved, stale, content_sha256, created_at, updated_at
+                FROM annotations WHERE collection=? AND stale=0 ORDER BY created_at, annotation_id
+                """,
+                (collection,),
+            )
+        for row in rows:
+            item = _annotation_row(row)
+            out.setdefault(item["asset_id"], []).append(item)
+    return out
+
+
+def _normalized_coordinate(value: Any, name: str) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a number") from exc
+    if not 0 <= number <= 1:
+        raise ValueError(f"{name} must be between 0 and 1")
+    return round(number, 6)
+
+
+def create_annotation(
+    collection: str, asset_id: str, kind: str, x: Any, y: Any,
+    *, w: Any = 0, h: Any = 0, text: str = "",
+) -> dict[str, Any]:
+    if kind not in {"point", "region"}:
+        raise ValueError("annotation kind must be point or region")
+    x_n = _normalized_coordinate(x, "x")
+    y_n = _normalized_coordinate(y, "y")
+    w_n = _normalized_coordinate(w, "w") if kind == "region" else 0.0
+    h_n = _normalized_coordinate(h, "h") if kind == "region" else 0.0
+    if kind == "region" and (w_n <= 0 or h_n <= 0):
+        raise ValueError("region annotations require positive width and height")
+    if x_n + w_n > 1.000001 or y_n + h_n > 1.000001:
+        raise ValueError("annotation geometry extends outside the image")
+    text = str(text)[:4000]
+    now = utc_now()
+    annotation_id = str(uuid.uuid4())
+    with _connection() as conn:
+        asset = conn.execute(
+            "SELECT rel, present FROM assets WHERE collection=? AND asset_id=?",
+            (collection, asset_id),
+        ).fetchone()
+    if not asset or not asset["present"]:
+        raise ValueError("asset not found")
+    source = safe_file(collection, str(asset["rel"]))
+    if not source:
+        raise ValueError("asset unavailable")
+    content_sha256 = file_sha256(source)
+    with _connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO annotations(annotation_id, asset_id, collection, kind, x, y, w, h, text, resolved, stale, content_sha256, created_at, updated_at)
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)
+            """,
+            (annotation_id, asset_id, collection, kind, x_n, y_n, w_n, h_n, text, content_sha256, now, now),
+        )
+        details = {
+            "annotation_id": annotation_id, "kind": kind, "x": x_n, "y": y_n,
+            "w": w_n, "h": h_n, "text": text, "resolved": False,
+        }
+        _record_system_event(conn, collection, asset["rel"], asset_id, "annotation_created", now, details)
+        row = conn.execute(
+            "SELECT annotation_id, asset_id, collection, kind, x, y, w, h, text, resolved, stale, content_sha256, created_at, updated_at FROM annotations WHERE annotation_id=?",
+            (annotation_id,),
+        ).fetchone()
+    return _annotation_row(row)
+
+
+def update_annotation(
+    collection: str, annotation_id: str, *, text: str | None = None, resolved: bool | None = None,
+) -> dict[str, Any]:
+    now = utc_now()
+    with _connection() as conn:
+        current = conn.execute(
+            """SELECT an.*, a.rel FROM annotations an
+            JOIN assets a ON a.asset_id=an.asset_id
+            WHERE an.collection=? AND an.annotation_id=?""",
+            (collection, annotation_id),
+        ).fetchone()
+        if not current:
+            raise ValueError("annotation not found")
+        new_text = str(current["text"] or "") if text is None else str(text)[:4000]
+        new_resolved = bool(current["resolved"]) if resolved is None else bool(resolved)
+        conn.execute(
+            "UPDATE annotations SET text=?, resolved=?, updated_at=? WHERE annotation_id=?",
+            (new_text, int(new_resolved), now, annotation_id),
+        )
+        details = {
+            "annotation_id": annotation_id, "text": new_text, "resolved": new_resolved,
+            "previous_resolved": bool(current["resolved"]),
+        }
+        _record_system_event(
+            conn, collection, current["rel"], current["asset_id"], "annotation_updated", now, details
+        )
+        row = conn.execute(
+            "SELECT annotation_id, asset_id, collection, kind, x, y, w, h, text, resolved, stale, content_sha256, created_at, updated_at FROM annotations WHERE annotation_id=?",
+            (annotation_id,),
+        ).fetchone()
+    return _annotation_row(row)
+
+
+def delete_annotation(collection: str, annotation_id: str) -> dict[str, Any]:
+    now = utc_now()
+    with _connection() as conn:
+        current = conn.execute(
+            """SELECT an.*, a.rel FROM annotations an
+            JOIN assets a ON a.asset_id=an.asset_id
+            WHERE an.collection=? AND an.annotation_id=?""",
+            (collection, annotation_id),
+        ).fetchone()
+        if not current:
+            raise ValueError("annotation not found")
+        item = _annotation_row(current)
+        conn.execute("DELETE FROM annotations WHERE annotation_id=?", (annotation_id,))
+        _record_system_event(
+            conn, collection, current["rel"], current["asset_id"], "annotation_deleted", now,
+            {"annotation_id": annotation_id, "kind": current["kind"], "text": current["text"]},
+        )
+    return item
+
 
 def review_records(collection: str | None = None) -> dict[str, dict[str, dict[str, Any]]]:
     query = "SELECT asset_id, collection, rel, status, comment, first_seen_at, seen_at, updated_at, present, size, mtime_ns, width, height, content_changed_at, missing_at, review_sha256 FROM assets"
@@ -689,7 +899,6 @@ def review_history(collection: str, relative: str, limit: int = 50) -> list[dict
 
 def undo_last_review(collection: str, relative: str) -> dict[str, Any] | None:
     now = utc_now()
-    source = safe_file(collection, relative)
     with _connection() as conn:
         asset = conn.execute(
             "SELECT asset_id FROM assets WHERE collection=? AND rel=?", (collection, relative)
@@ -707,20 +916,23 @@ def undo_last_review(collection: str, relative: str) -> dict[str, Any] | None:
             """,
             (asset["asset_id"], collection, relative, asset["asset_id"]),
         ).fetchone()
-        if not event:
-            return None
+    if not event:
+        return None
+    source = safe_file(collection, relative)
+    review_sha256 = file_sha256(source) if event["old_status"] and source else None
+    with _connection() as conn:
         conn.execute(
             "UPDATE assets SET status=?, comment=?, review_sha256=?, updated_at=? WHERE asset_id=?",
-            (event["old_status"], event["old_comment"], file_sha256(source) if event["old_status"] and source else None, now, asset["asset_id"]),
+            (event["old_status"], event["old_comment"], review_sha256, now, asset["asset_id"]),
         )
         conn.execute("UPDATE review_events SET undone_at=? WHERE id=?", (now, event["id"]))
-        return {
-            "event_id": event["id"],
-            "asset_id": asset["asset_id"],
-            "status": event["old_status"],
-            "comment": event["old_comment"],
-            "undone_at": now,
-        }
+    return {
+        "event_id": event["id"],
+        "asset_id": asset["asset_id"],
+        "status": event["old_status"],
+        "comment": event["old_comment"],
+        "undone_at": now,
+    }
 
 
 def set_review(collection: str, relative: str, status: str, comment: str | None = None, mark_seen: bool = True) -> None:
@@ -1033,7 +1245,17 @@ def review_manifest(collection: str | None = None, status: str | None = None, in
         query += " WHERE " + " AND ".join(clauses)
     query += " ORDER BY collection, rel"
     items = []
+    annotations_by_asset: dict[str, list[dict[str, Any]]] = {}
     with _connection() as conn:
+        annotation_query = "SELECT annotation_id, asset_id, collection, kind, x, y, w, h, text, resolved, stale, content_sha256, created_at, updated_at FROM annotations"
+        annotation_args: tuple[Any, ...] = ()
+        if collection:
+            annotation_query += " WHERE collection=?"
+            annotation_args = (collection,)
+        annotation_query += " ORDER BY created_at, annotation_id"
+        for annotation_row in conn.execute(annotation_query, annotation_args):
+            annotation = _annotation_row(annotation_row)
+            annotations_by_asset.setdefault(annotation["asset_id"], []).append(annotation)
         for row in conn.execute(query, tuple(args)):
             items.append({
                 "asset_id": row["asset_id"],
@@ -1051,6 +1273,7 @@ def review_manifest(collection: str | None = None, status: str | None = None, in
                 "width": row["width"],
                 "height": row["height"],
                 "review_sha256": row["review_sha256"],
+                "annotations": annotations_by_asset.get(str(row["asset_id"]), []),
                 "content_changed_at": row["content_changed_at"],
                 "missing_at": row["missing_at"],
             })
@@ -1075,3 +1298,61 @@ def thumb_path(source: Path) -> Path:
 
 def preview_path(source: Path) -> Path:
     return _render_cache_path(source, "preview")
+
+def preview_cache_status() -> dict[str, Any]:
+    root = cache_dir()
+    entries = []
+    for path in root.glob("*.jpg"):
+        try:
+            stat = path.stat()
+            entries.append((path, int(stat.st_size), float(stat.st_mtime)))
+        except OSError:
+            continue
+    return {
+        "path": str(root),
+        "files": len(entries),
+        "bytes": sum(size for _, size, _ in entries),
+        "oldest_mtime": min((mtime for _, _, mtime in entries), default=None),
+        "newest_mtime": max((mtime for _, _, mtime in entries), default=None),
+    }
+
+
+def prune_preview_cache(max_bytes: int, max_age_seconds: int) -> dict[str, Any]:
+    """Prune cached previews deterministically by age, then oldest-first size pressure."""
+    root = cache_dir()
+    now = datetime.now(timezone.utc).timestamp()
+    entries: list[tuple[Path, int, float]] = []
+    for path in root.glob("*.jpg"):
+        try:
+            stat = path.stat()
+            entries.append((path, int(stat.st_size), float(stat.st_mtime)))
+        except OSError:
+            continue
+    removed_files = 0
+    removed_bytes = 0
+    kept: list[tuple[Path, int, float]] = []
+    for path, size, mtime in entries:
+        expired = max_age_seconds > 0 and now - mtime > max_age_seconds
+        if expired:
+            try:
+                path.unlink()
+                removed_files += 1
+                removed_bytes += size
+            except OSError:
+                kept.append((path, size, mtime))
+        else:
+            kept.append((path, size, mtime))
+    total = sum(size for _, size, _ in kept)
+    if max_bytes > 0 and total > max_bytes:
+        for path, size, mtime in sorted(kept, key=lambda item: (item[2], item[0].name)):
+            if total <= max_bytes:
+                break
+            try:
+                path.unlink()
+                removed_files += 1
+                removed_bytes += size
+                total -= size
+            except OSError:
+                continue
+    status = preview_cache_status()
+    return status | {"removed_files": removed_files, "removed_bytes": removed_bytes}

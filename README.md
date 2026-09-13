@@ -10,6 +10,12 @@ It was built for a simple workflow problem: agents and creative tools are increa
 
 ![Asset Viewer demo](docs/screenshot.png)
 
+### Precision review
+
+Open an exact asset, leave point/region feedback, compare variants with linked zoom/pan, and keep the full-resolution original out of the routine review path.
+
+![Asset Viewer precision review](docs/precision-review.png)
+
 ## Why it exists
 
 A good image pipeline should be boring:
@@ -27,9 +33,9 @@ No import job. No duplicate asset library. No requirement to upload the batch to
 - **Fast thumbnail grid** with lazy loading and disk-cached previews.
 - **Full-screen carousel** using bounded review-size previews; full-resolution originals load only on explicit request.
 - **Approve / Maybe / Reject** states stored separately from source files.
-- **Review notes/comments** attached to the exact asset without modifying it.
+- **Review notes/comments plus pinned point/region annotations** attached to the exact asset without modifying it; spatial feedback is content-fingerprinted and becomes stale if the underlying pixels change.
 - **New/unseen tracking** so recurring collections show what changed.
-- **Batch review plus side-by-side / overlay / difference comparison** for fast variant triage.
+- **Batch review plus side-by-side / overlay / difference comparison** with linked or independent zoom/pan for precise variant triage.
 - **Stable collection and asset deep links** for direct handoff to a gallery or exact image.
 - **Machine-readable manifests and ordered event feeds** through the CLI and read-only JSON API.
 - **Explicit review completion** with automation-friendly pending state.
@@ -39,9 +45,9 @@ No import job. No duplicate asset library. No requirement to upload the batch to
 - **Keyboard review**: arrow keys to navigate; `A`, `M`, `R` to classify.
 - **Multiple collections** behind one viewer URL.
 - **Recursive discovery** of PNG, JPEG, WebP, GIF, AVIF, BMP, and SVG assets.
-- **Local-first security posture** — localhost by default, CSRF/Host enforcement, safe SVG handling, bounded previews/scans, and optional Basic auth.
+- **Local-first security posture** — localhost by default, Waitress production serving, CSRF/Host enforcement, safe SVG handling, process-isolated bounded decoding, and optional Basic auth.
 - **Agent-friendly CLI** that is easy to call from scripts and repo instructions.
-- **Minimal stack** — Python, Pillow, SQLite from the standard library, and a small browser UI. No external database service required.
+- **Minimal stack** — Python, Pillow, Waitress, SQLite from the standard library, and a small browser UI. No external database service required.
 
 ## Quick start
 
@@ -98,6 +104,14 @@ asset-viewer history SLUG REL       Show review history for one asset
 asset-viewer undo SLUG REL          Undo the latest review/comment change
 asset-viewer collection-url SLUG    Print the stable collection handoff URL
 asset-viewer asset-url SLUG ASSET   Print a stable deep link to one asset
+asset-viewer annotations SLUG ASSET List point/region feedback for one asset
+asset-viewer annotate ...            Create precise point/region feedback
+asset-viewer cache [status|prune]   Inspect/prune generated preview cache
+asset-viewer annotations SLUG ASSET List pinned spatial feedback
+asset-viewer annotate ...           Create point/region feedback for agents
+asset-viewer annotation-update ...  Resolve/reopen/edit an annotation
+asset-viewer annotation-delete ...  Delete an annotation
+asset-viewer cache [status|prune]    Inspect/prune generated preview cache
 asset-viewer doctor                Check state and deployment prerequisites
 asset-viewer serve                 Start the web viewer
 asset-viewer demo                  Create/register synthetic demo assets
@@ -175,7 +189,7 @@ For remote use, keep the application on `127.0.0.1` and put it behind an authent
 ASSET_VIEWER_PASSWORD='use-a-secret-manager' asset-viewer serve --host 127.0.0.1 --trusted-host gallery.example.com
 ```
 
-Direct non-loopback binds require both a trusted Host configuration and built-in authentication by default. `--allow-unauthenticated-remote` is an explicit escape hatch only for deployments where a trusted private/authenticated boundary already provides access control. Do not expose the raw listener directly to the public internet.
+`asset-viewer serve` now uses Waitress as its production serving layer. Direct non-loopback binds require both a trusted Host configuration and built-in authentication by default. `--allow-unauthenticated-remote` is an explicit escape hatch only for deployments where a trusted private/authenticated boundary already provides access control. Keep TLS and any broader identity/SSO policy at a trusted reverse proxy or private-network boundary.
 
 See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), [SECURITY.md](SECURITY.md), the [initial security audit](docs/SECURITY_AUDIT_2026-09-13.md), and the [round-2 review-integrity audit](docs/SECURITY_AUDIT_2026-09-13_ROUND2.md). The [feature audit](docs/FEATURE_AUDIT_2026-09-13.md) records the competitive/product analysis behind the roadmap.
 
@@ -214,18 +228,22 @@ asset-viewer serve --port 8160
 - [Agent/API contract](docs/API.md)
 - [Feature and benefit analysis](docs/FEATURE_ANALYSIS.md)
 - [v0.4 feature audit](docs/FEATURE_AUDIT_2026-09-13.md)
+- [v0.5 feature and benefit audit](docs/FEATURE_AUDIT_2026-09-13_V05.md)
 - [Initial security audit](docs/SECURITY_AUDIT_2026-09-13.md)
 - [Round-two security audit](docs/SECURITY_AUDIT_2026-09-13_ROUND2.md)
+- [Round-three production/precision-review security audit](docs/SECURITY_AUDIT_2026-09-13_ROUND3.md)
 - [Deployment guide](docs/DEPLOYMENT.md)
 - [Product roadmap](docs/ROADMAP.md)
 - [Round-2 security audit](docs/SECURITY_AUDIT_2026-09-13_ROUND2.md)
 - [Competitive feature audit](docs/FEATURE_AUDIT_2026-09-13.md)
+- [Round-3 security audit](docs/SECURITY_AUDIT_2026-09-13_ROUND3.md)
+- [Round-2 feature audit](docs/FEATURE_AUDIT_2026-09-13_ROUND2.md)
 
 ## Roadmap
 
 The roadmap is organized around a deliberate progression: **production hardening → human/agent feedback → agent-native automation → serious creative review → collaboration**.
 
-The core machine-readable human→agent loop is now implemented. The next product frontier is precise visual feedback (pinned annotations), variant/version families, and linked comparison controls—while the remaining P0 engineering work hardens serving and image decoding for larger deployments.
+The core machine-readable human→agent loop now includes precise point/region feedback and linked comparison controls. The next product frontier is variant/version families, near-real-time filesystem watching, and a first-class MCP adapter while preserving the local-first review-plane boundary.
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the phased feature/benefit analysis and roadmap.
 

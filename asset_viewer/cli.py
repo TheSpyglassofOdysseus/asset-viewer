@@ -11,9 +11,14 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 from . import __version__
-from .app import LOOPBACK_HOSTS, capability_document, scan_collection, serve
+from .app import LOOPBACK_HOSTS, capability_document, scan_collection, serve as development_serve
+from .wsgi import serve as production_serve
 from .storage import (
     add_collection,
+    annotations_for_asset,
+    create_annotation,
+    update_annotation,
+    delete_annotation,
     catalog_records,
     catalog_state,
     collections,
@@ -21,6 +26,8 @@ from .storage import (
     data_dir,
     database_path,
     pending_summary,
+    preview_cache_status,
+    prune_preview_cache,
     remove_collection,
     reopen_collection_review,
     review_events_since,
@@ -82,6 +89,14 @@ def print_manifest(manifest: dict, as_json: bool) -> None:
         print(f"{item['collection']}\t{status}\t{item['rel']}\t{comment}")
 
 
+def resolve_asset(collection: str, asset: str) -> dict:
+    records = catalog_records(collection, present_only=False)
+    match = next((row for row in records if row["asset_id"] == asset or row["rel"] == asset), None)
+    if not match:
+        raise ValueError(f"asset not found: {asset}")
+    return match
+
+
 def doctor(host: str, trusted_hosts: list[str]) -> int:
     findings: list[tuple[str, str]] = []
     root = data_dir()
@@ -112,9 +127,16 @@ def doctor(host: str, trusted_hosts: list[str]) -> int:
     else:
         findings.append(("PASS", "loopback bind is the safest default"))
     findings.append(("PASS" if os.environ.get("ASSET_VIEWER_PASSWORD") else "INFO", "built-in Basic auth " + ("enabled" if os.environ.get("ASSET_VIEWER_PASSWORD") else "disabled (acceptable for localhost/private proxy use)")))
-    findings.append(("WARN", "built-in http.server is intended for local/private use; use a production reverse proxy/access boundary for remote service"))
+    try:
+        from importlib.metadata import version
+        waitress_version = version("waitress")
+        findings.append(("PASS", f"production HTTP server: Waitress {waitress_version}"))
+    except Exception as exc:
+        findings.append(("FAIL", f"Waitress production server unavailable: {exc}"))
     findings.append(("INFO", f"scan limits: files={os.environ.get('ASSET_VIEWER_MAX_SCAN_FILES', '50000')} seconds={os.environ.get('ASSET_VIEWER_MAX_SCAN_SECONDS', '10')}"))
     findings.append(("INFO", f"preview limits: bytes={os.environ.get('ASSET_VIEWER_MAX_THUMBNAIL_BYTES', str(250 * 1024 * 1024))} pixels={os.environ.get('ASSET_VIEWER_MAX_IMAGE_PIXELS', '50000000')} workers={os.environ.get('ASSET_VIEWER_THUMBNAIL_WORKERS', '2')}"))
+    cache = preview_cache_status()
+    findings.append(("INFO", f"preview cache: files={cache['files']} bytes={cache['bytes']} path={cache['path']}"))
     failures = 0
     for level, text in findings:
         print(f"[{level}] {text}")
@@ -200,11 +222,49 @@ def build_parser() -> argparse.ArgumentParser:
     asset_url.add_argument("asset", help="Stable asset ID or relative path")
     asset_url.add_argument("--base-url", default="http://127.0.0.1:8160")
 
+    annotations = sub.add_parser("annotations", help="List spatial annotations for one asset")
+    annotations.add_argument("collection")
+    annotations.add_argument("asset", help="Stable asset ID or relative path")
+    annotations.add_argument("--json", action="store_true")
+    annotations.add_argument("--active-only", action="store_true", help="Exclude stale annotations")
+
+    annotate = sub.add_parser("annotate", help="Create a point or region annotation")
+    annotate.add_argument("collection")
+    annotate.add_argument("asset", help="Stable asset ID or relative path")
+    annotate.add_argument("kind", choices=["point", "region"])
+    annotate.add_argument("x", type=float, help="Normalized left position 0..1")
+    annotate.add_argument("y", type=float, help="Normalized top position 0..1")
+    annotate.add_argument("text", nargs="?", default="")
+    annotate.add_argument("--width", type=float, default=0.0)
+    annotate.add_argument("--height", type=float, default=0.0)
+    annotate.add_argument("--json", action="store_true")
+
+    annotation_update = sub.add_parser("annotation-update", help="Update or resolve a spatial annotation")
+    annotation_update.add_argument("collection")
+    annotation_update.add_argument("annotation_id")
+    annotation_update.add_argument("--text")
+    state_group = annotation_update.add_mutually_exclusive_group()
+    state_group.add_argument("--resolve", action="store_true")
+    state_group.add_argument("--reopen", action="store_true")
+    annotation_update.add_argument("--json", action="store_true")
+
+    annotation_delete = sub.add_parser("annotation-delete", help="Delete a spatial annotation")
+    annotation_delete.add_argument("collection")
+    annotation_delete.add_argument("annotation_id")
+
+    cache = sub.add_parser("cache", help="Inspect or prune generated preview cache")
+    cache.add_argument("action", choices=["status", "prune"], nargs="?", default="status")
+    cache.add_argument("--max-mb", type=int, default=int(os.environ.get("ASSET_VIEWER_CACHE_MAX_MB", "2048")))
+    cache.add_argument("--max-age-days", type=int, default=int(os.environ.get("ASSET_VIEWER_CACHE_MAX_AGE_DAYS", "30")))
+    cache.add_argument("--json", action="store_true")
+
     run = sub.add_parser("serve", help="Run the web viewer")
     run.add_argument("--host", default="127.0.0.1")
     run.add_argument("--port", type=int, default=8160)
     run.add_argument("--trusted-host", action="append", default=[], help="Allowed Host header (repeatable). Required for non-loopback binds and reverse proxies.")
     run.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], default="INFO")
+    run.add_argument("--http-threads", type=int, default=6, help="Waitress HTTP worker threads (default: 6)")
+    run.add_argument("--development-server", action="store_true", help="Use the legacy stdlib development server instead of Waitress")
     run.add_argument(
         "--allow-unauthenticated-remote", action="store_true",
         help="Allow a non-loopback listener without built-in Basic auth. Use only behind a trusted authenticated/private boundary.",
@@ -341,17 +401,60 @@ def main() -> None:
         elif args.command == "asset-url":
             if not root_for(args.collection):
                 raise ValueError(f"collection not found: {args.collection}")
-            records = catalog_records(args.collection, present_only=False)
-            asset = next((row for row in records if row["asset_id"] == args.asset or row["rel"] == args.asset), None)
-            if not asset:
-                raise ValueError(f"asset not found: {args.asset}")
+            asset = resolve_asset(args.collection, args.asset)
             base = args.base_url.rstrip('/')
             print(base + "/c/" + args.collection + "?asset=" + asset["asset_id"])
-        elif args.command == "serve":
-            serve(
-                args.host, args.port, args.trusted_host, log_level=args.log_level,
-                allow_unauthenticated_remote=args.allow_unauthenticated_remote,
+        elif args.command == "annotations":
+            asset = resolve_asset(args.collection, args.asset)
+            rows = annotations_for_asset(args.collection, asset["asset_id"], include_stale=not args.active_only)
+            if args.json:
+                print(json.dumps({"version": 1, "collection": args.collection, "asset_id": asset["asset_id"], "annotations": rows}, indent=2, sort_keys=True))
+            else:
+                for annotation in rows:
+                    marker = "stale" if annotation["stale"] else ("resolved" if annotation["resolved"] else "open")
+                    print(f"{annotation['annotation_id']}\t{annotation['kind']}\t{marker}\t{annotation['text']}")
+        elif args.command == "annotate":
+            asset = resolve_asset(args.collection, args.asset)
+            annotation = create_annotation(
+                args.collection, asset["asset_id"], args.kind, args.x, args.y,
+                w=args.width, h=args.height, text=args.text,
             )
+            if args.json:
+                print(json.dumps(annotation, indent=2, sort_keys=True))
+            else:
+                print(f"Created {annotation['kind']} annotation {annotation['annotation_id']}")
+        elif args.command == "annotation-update":
+            resolved = True if args.resolve else False if args.reopen else None
+            annotation = update_annotation(args.collection, args.annotation_id, text=args.text, resolved=resolved)
+            if args.json:
+                print(json.dumps(annotation, indent=2, sort_keys=True))
+            else:
+                print(f"Updated annotation {annotation['annotation_id']}")
+        elif args.command == "annotation-delete":
+            annotation = delete_annotation(args.collection, args.annotation_id)
+            print(f"Deleted annotation {annotation['annotation_id']}")
+        elif args.command == "cache":
+            if args.action == "prune":
+                payload = prune_preview_cache(max(0, args.max_mb) * 1024 * 1024, max(0, args.max_age_days) * 86400)
+            else:
+                payload = preview_cache_status()
+            if args.json:
+                print(json.dumps(payload, indent=2, sort_keys=True))
+            else:
+                print(f"files={payload['files']} bytes={payload['bytes']} path={payload['path']}")
+                if 'removed_files' in payload:
+                    print(f"removed_files={payload['removed_files']} removed_bytes={payload['removed_bytes']}")
+        elif args.command == "serve":
+            if args.development_server:
+                development_serve(
+                    args.host, args.port, args.trusted_host, log_level=args.log_level,
+                    allow_unauthenticated_remote=args.allow_unauthenticated_remote,
+                )
+            else:
+                production_serve(
+                    args.host, args.port, args.trusted_host, log_level=args.log_level,
+                    allow_unauthenticated_remote=args.allow_unauthenticated_remote, threads=args.http_threads,
+                )
         elif args.command == "doctor":
             raise SystemExit(doctor(args.host, args.trusted_host))
         elif args.command == "demo":

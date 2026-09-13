@@ -1,3 +1,4 @@
 # Runtime dependency set used to audit/build Asset Viewer releases.
-# Keep synchronized with pyproject.toml's supported Pillow range.
+# Keep synchronized with pyproject.toml's runtime dependencies.
 Pillow==12.3.0
+waitress==3.0.2
