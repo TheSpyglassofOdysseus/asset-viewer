@@ -25,15 +25,16 @@ No import job. No duplicate asset library. No requirement to upload the batch to
 
 - **Register existing folders in place** — originals never need to move.
 - **Fast thumbnail grid** with lazy loading and disk-cached previews.
-- **Full-screen carousel** for image-by-image review.
+- **Full-screen carousel** using bounded review-size previews; full-resolution originals load only on explicit request.
 - **Approve / Maybe / Reject** states stored separately from source files.
 - **Review notes/comments** attached to the exact asset without modifying it.
 - **New/unseen tracking** so recurring collections show what changed.
-- **Batch review and compare mode** for fast variant triage.
-- **Stable collection URLs** at `/c/<slug>` for direct handoff.
-- **Machine-readable manifests** through the CLI and read-only JSON API.
+- **Batch review plus side-by-side / overlay / difference comparison** for fast variant triage.
+- **Stable collection and asset deep links** for direct handoff to a gallery or exact image.
+- **Machine-readable manifests and ordered event feeds** through the CLI and read-only JSON API.
 - **Explicit review completion** with automation-friendly pending state.
 - **Review history and undo** for status/comment decisions.
+- **Stable asset IDs and durable cataloging** so review state survives renames and safely notices replacements/deletions.
 - **Filename/path search and sorting** for growing collections.
 - **Keyboard review**: arrow keys to navigate; `A`, `M`, `R` to classify.
 - **Multiple collections** behind one viewer URL.
@@ -84,15 +85,19 @@ The demo command creates a small set of synthetic sample assets and registers th
 asset-viewer add PATH [LABEL]      Register an image folder
 asset-viewer remove SLUG|PATH      Remove a collection
 asset-viewer list                  List registered folders
+asset-viewer capabilities --json   Describe the stable agent/API contract
 asset-viewer scan [--collection]   Discover/refresh asset metadata
 asset-viewer reviews [--collection]  Read review state (add --json for agents)
 asset-viewer export-manifest       Export review state as JSON
 asset-viewer pending                Exit 2 while human review is still pending
+asset-viewer events                 Read ordered review events for automation
+asset-viewer wait-for-review        Wait on the explicit human-completion gate
 asset-viewer complete SLUG          Mark a fully-reviewed collection complete
 asset-viewer reopen SLUG            Reopen collection review
 asset-viewer history SLUG REL       Show review history for one asset
 asset-viewer undo SLUG REL          Undo the latest review/comment change
-asset-viewer collection-url SLUG    Print the stable browser handoff URL
+asset-viewer collection-url SLUG    Print the stable collection handoff URL
+asset-viewer asset-url SLUG ASSET   Print a stable deep link to one asset
 asset-viewer doctor                Check state and deployment prerequisites
 asset-viewer serve                 Start the web viewer
 asset-viewer demo                  Create/register synthetic demo assets
@@ -133,10 +138,13 @@ asset-viewer pending --collection project-images --json
 # exit code 0 = review explicitly completed
 
 asset-viewer reviews --collection project-images --json
+asset-viewer events --collection project-images --after 0 --json
+asset-viewer wait-for-review --collection project-images --timeout 900 --json
 asset-viewer collection-url project-images --base-url https://viewer.example.com
+asset-viewer asset-url project-images concept-17.png --base-url https://viewer.example.com
 ```
 
-See [docs/AGENT_WORKFLOW.md](docs/AGENT_WORKFLOW.md) for a fuller pattern.
+See [docs/AGENT_WORKFLOW.md](docs/AGENT_WORKFLOW.md) for a fuller pattern and [docs/API.md](docs/API.md) for the versioned machine-readable contract.
 
 ## Data model
 
@@ -147,7 +155,7 @@ By default it stores only:
 ```text
 ~/.local/share/asset-viewer/
 ├── collections.json    # registered source folders
-└── asset-viewer.db     # transactional review state, notes, seen/new state
+└── asset-viewer.db     # transactional catalog, stable IDs, review/events state
 
 ~/.cache/asset-viewer/
 └── *.jpg               # generated thumbnails
@@ -167,9 +175,9 @@ For remote use, keep the application on `127.0.0.1` and put it behind an authent
 ASSET_VIEWER_PASSWORD='use-a-secret-manager' asset-viewer serve --host 127.0.0.1 --trusted-host gallery.example.com
 ```
 
-Non-loopback binds are rejected unless at least one `--trusted-host` is supplied. Do not expose the raw listener directly to the public internet unless you have added an appropriate authentication boundary in front of it.
+Direct non-loopback binds require both a trusted Host configuration and built-in authentication by default. `--allow-unauthenticated-remote` is an explicit escape hatch only for deployments where a trusted private/authenticated boundary already provides access control. Do not expose the raw listener directly to the public internet.
 
-See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), [SECURITY.md](SECURITY.md), and the [2026-09-13 security audit](docs/SECURITY_AUDIT_2026-09-13.md).
+See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), [SECURITY.md](SECURITY.md), the [initial security audit](docs/SECURITY_AUDIT_2026-09-13.md), and the [round-2 review-integrity audit](docs/SECURITY_AUDIT_2026-09-13_ROUND2.md). The [feature audit](docs/FEATURE_AUDIT_2026-09-13.md) records the competitive/product analysis behind the roadmap.
 
 ## Project philosophy
 
@@ -201,15 +209,31 @@ asset-viewer demo --path "$PWD/.demo-assets"
 asset-viewer serve --port 8160
 ```
 
+## Engineering documents
+
+- [Agent/API contract](docs/API.md)
+- [Feature and benefit analysis](docs/FEATURE_ANALYSIS.md)
+- [v0.4 feature audit](docs/FEATURE_AUDIT_2026-09-13.md)
+- [Initial security audit](docs/SECURITY_AUDIT_2026-09-13.md)
+- [Round-two security audit](docs/SECURITY_AUDIT_2026-09-13_ROUND2.md)
+- [Deployment guide](docs/DEPLOYMENT.md)
+- [Product roadmap](docs/ROADMAP.md)
+- [Round-2 security audit](docs/SECURITY_AUDIT_2026-09-13_ROUND2.md)
+- [Competitive feature audit](docs/FEATURE_AUDIT_2026-09-13.md)
+
 ## Roadmap
 
 The roadmap is organized around a deliberate progression: **production hardening → human/agent feedback → agent-native automation → serious creative review → collaboration**.
 
-The highest-value product step after hardening is a machine-readable review manifest: humans should be able to approve, reject, or comment visually, and agents should be able to consume that decision without scraping the UI or parsing a chat transcript.
+The core machine-readable human→agent loop is now implemented. The next product frontier is precise visual feedback (pinned annotations), variant/version families, and linked comparison controls—while the remaining P0 engineering work hardens serving and image decoding for larger deployments.
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the phased feature/benefit analysis and roadmap.
 
 Issues and focused pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Releases
+
+Tagged releases publish a wheel, source archive, CycloneDX SBOM, and SHA-256 checksums. Release CI also runs the security and dependency checks described in the audit documentation.
 
 ## License
 

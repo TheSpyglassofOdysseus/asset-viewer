@@ -10,8 +10,10 @@ import os
 import secrets
 import shutil
 import time
+import threading
 import urllib.parse
 import warnings
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -21,22 +23,26 @@ from PIL import Image, ImageDraw, ImageOps
 from . import __version__
 from .storage import (
     IMAGE_EXTS,
+    asset_rel,
+    catalog_records,
+    catalog_state,
     collection_review_state,
     collections,
     complete_collection_review,
-    ensure_assets,
     mark_seen,
     pending_summary,
+    reconcile_catalog,
     reopen_collection_review,
+    review_events_since,
     review_history,
     review_manifest,
-    review_records,
     root_for,
     safe_file,
     set_comment,
     set_review,
     set_reviews_batch,
     thumb_path,
+    preview_path,
     undo_last_review,
 )
 
@@ -55,9 +61,48 @@ def _env_int(name: str, default: int, minimum: int = 1) -> int:
 
 MAX_SCAN_FILES = _env_int("ASSET_VIEWER_MAX_SCAN_FILES", 50_000)
 MAX_SCAN_SECONDS = _env_int("ASSET_VIEWER_MAX_SCAN_SECONDS", 10)
+SCAN_TTL_SECONDS = _env_int("ASSET_VIEWER_SCAN_TTL_SECONDS", 60)
 MAX_THUMBNAIL_SOURCE_BYTES = _env_int("ASSET_VIEWER_MAX_THUMBNAIL_BYTES", 250 * 1024 * 1024)
 MAX_IMAGE_PIXELS = _env_int("ASSET_VIEWER_MAX_IMAGE_PIXELS", 50_000_000)
+MAX_THUMBNAIL_CONCURRENCY = _env_int("ASSET_VIEWER_THUMBNAIL_WORKERS", 2)
+THUMBNAIL_SEMAPHORE = threading.BoundedSemaphore(MAX_THUMBNAIL_CONCURRENCY)
 Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
+
+
+def capability_document() -> dict[str, Any]:
+    return {
+        "app": "asset-viewer",
+        "app_version": __version__,
+        "protocol_version": 1,
+        "review_statuses": ["approved", "maybe", "rejected"],
+        "features": {
+            "stable_asset_ids": True,
+            "catalog": True,
+            "review_comments": True,
+            "review_history": True,
+            "undo": True,
+            "batch_review": True,
+            "compare": True,
+            "compare_modes": ["side", "overlay", "difference"],
+            "explicit_completion": True,
+            "event_feed": True,
+            "filesystem_lifecycle_events": True,
+            "wait_for_review_cli": True,
+            "asset_deep_links": True,
+            "tombstones": True,
+            "bounded_review_previews": True,
+        },
+        "limits": {
+            "max_scan_files": MAX_SCAN_FILES,
+            "max_scan_seconds": MAX_SCAN_SECONDS,
+            "scan_ttl_seconds": SCAN_TTL_SECONDS,
+            "max_thumbnail_source_bytes": MAX_THUMBNAIL_SOURCE_BYTES,
+            "max_image_pixels": MAX_IMAGE_PIXELS,
+            "thumbnail_concurrency": MAX_THUMBNAIL_CONCURRENCY,
+            "max_batch_review": 500,
+            "max_comment_chars": 10000,
+        },
+    }
 
 
 def _host_name(value: str) -> str | None:
@@ -104,118 +149,192 @@ def _safe_dimension(path: Path) -> tuple[int, int, str | None]:
         return 0, 0, "preview metadata unavailable"
 
 
-def scan_collection(slug: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def _catalog_fresh(state: dict[str, Any]) -> bool:
+    value = state.get("last_scan_at")
+    if not value:
+        return False
+    try:
+        scanned = datetime.fromisoformat(str(value))
+        if scanned.tzinfo is None:
+            scanned = scanned.replace(tzinfo=timezone.utc)
+        return max(0.0, (datetime.now(timezone.utc) - scanned).total_seconds()) < SCAN_TTL_SECONDS
+    except (TypeError, ValueError):
+        return False
+
+
+def _gallery_rows(slug: str, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for record in records:
+        rel = record["rel"]
+        quoted = urllib.parse.quote(rel, safe="/")
+        mtime_ns = int(record.get("mtime_ns") or 0)
+        rows.append({
+            "asset_id": record.get("asset_id"),
+            "collection": slug,
+            "name": Path(rel).name,
+            "rel": rel,
+            "size": int(record.get("size") or 0),
+            "mtime": mtime_ns / 1_000_000_000 if mtime_ns else 0,
+            "width": int(record.get("width") or 0),
+            "height": int(record.get("height") or 0),
+            "status": record.get("status") or "",
+            "comment": record.get("comment") or "",
+            "is_new": record.get("seen_at") is None,
+            "first_seen_at": record.get("first_seen_at"),
+            "seen_at": record.get("seen_at"),
+            "updated_at": record.get("updated_at"),
+            "preview_error": record.get("preview_error"),
+            "present": bool(record.get("present", 1)),
+            "thumb": f"/asset/thumb/{slug}/{quoted}",
+            "preview": f"/asset/preview/{slug}/{quoted}",
+            "file": f"/asset/file/{slug}/{quoted}",
+        })
+    return rows
+
+
+def scan_collection(slug: str, force: bool = False) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     root = root_for(slug)
     if not root:
-        return [], {"truncated": False, "reason": None, "elapsed_ms": 0}
+        configured = any(row["slug"] == slug for row in collections())
+        if not configured:
+            return [], {"truncated": False, "reason": None, "elapsed_ms": 0, "generation": 0, "last_scan_at": None, "cached": True}
+        state = reconcile_catalog(slug, [], truncated=True, reason="collection_unavailable", elapsed_ms=0)
+        return _gallery_rows(slug, catalog_records(slug, present_only=True)), state | {"cached": True}
+
+    current_state = catalog_state(slug)
+    if current_state["generation"] > 0 and not force and _catalog_fresh(current_state):
+        return _gallery_rows(slug, catalog_records(slug, present_only=True)), current_state | {"cached": True}
+
     started = time.monotonic()
-    found: list[tuple[Path, str, os.stat_result, int, int, str | None]] = []
+    existing = catalog_records(slug, present_only=False)
+    by_rel = {row["rel"]: row for row in existing}
+    by_identity = {
+        (int(row["device"]), int(row["inode"])): row
+        for row in existing
+        if row.get("device") and row.get("inode")
+    }
+    discoveries: list[dict[str, Any]] = []
     truncated = False
     reason = None
     visited = 0
+    def walk_error(exc: OSError) -> None:
+        LOGGER.warning("collection walk error slug=%s error=%s", slug, exc)
+
     try:
-        iterator = root.rglob("*")
-        for path in iterator:
-            if time.monotonic() - started > MAX_SCAN_SECONDS:
-                truncated, reason = True, "scan_time_limit"
-                break
-            try:
-                if not path.is_file() or path.suffix.lower() not in IMAGE_EXTS:
-                    continue
-                visited += 1
-                if visited > MAX_SCAN_FILES:
-                    truncated, reason = True, "scan_file_limit"
+        stop = False
+        for directory, _, filenames in os.walk(root, followlinks=False, onerror=walk_error):
+            for filename in filenames:
+                if time.monotonic() - started > MAX_SCAN_SECONDS:
+                    truncated, reason, stop = True, "scan_time_limit", True
                     break
-                rel = path.relative_to(root).as_posix()
-                stat = path.stat()
-                width, height, preview_error = _safe_dimension(path)
-                found.append((path, rel, stat, width, height, preview_error))
-            except OSError as exc:
-                LOGGER.warning("skipping unreadable asset %s: %s", path, exc)
+                path = Path(directory) / filename
+                try:
+                    if path.suffix.lower() not in IMAGE_EXTS:
+                        continue
+                    resolved = path.resolve(strict=True)
+                    if resolved == root or root not in resolved.parents or not resolved.is_file():
+                        LOGGER.warning("skipping asset that resolves outside collection root: %s", path)
+                        continue
+                    visited += 1
+                    if visited > MAX_SCAN_FILES:
+                        truncated, reason, stop = True, "scan_file_limit", True
+                        break
+                    rel = path.relative_to(root).as_posix()
+                    stat = resolved.stat()
+                    prior = by_rel.get(rel) or by_identity.get((int(stat.st_dev), int(stat.st_ino)))
+                    if prior and prior.get("size") == stat.st_size and prior.get("mtime_ns") == stat.st_mtime_ns:
+                        width = prior.get("width") or 0
+                        height = prior.get("height") or 0
+                        preview_error = prior.get("preview_error")
+                    else:
+                        width, height, preview_error = _safe_dimension(resolved)
+                    discoveries.append({
+                        "rel": rel,
+                        "device": int(stat.st_dev),
+                        "inode": int(stat.st_ino),
+                        "size": int(stat.st_size),
+                        "mtime_ns": int(stat.st_mtime_ns),
+                        "width": int(width or 0),
+                        "height": int(height or 0),
+                        "preview_error": preview_error,
+                    })
+                except OSError as exc:
+                    LOGGER.warning("skipping unreadable asset %s: %s", path, exc)
+            if stop:
+                break
     except OSError as exc:
         LOGGER.warning("collection scan failed for %s: %s", slug, exc)
+        truncated, reason = True, "scan_error"
 
-    ensure_assets(slug, [rel for _, rel, *_ in found])
-    records = review_records(slug).get(slug, {})
-    rows: list[dict[str, Any]] = []
-    for path, rel, stat, width, height, preview_error in found:
-        quoted = urllib.parse.quote(rel, safe="/")
-        review = records.get(rel, {})
-        rows.append({
-            "collection": slug,
-            "name": path.name,
-            "rel": rel,
-            "size": stat.st_size,
-            "mtime": stat.st_mtime,
-            "width": width,
-            "height": height,
-            "status": review.get("status", ""),
-            "comment": review.get("comment", ""),
-            "is_new": review.get("seen_at") is None,
-            "first_seen_at": review.get("first_seen_at"),
-            "seen_at": review.get("seen_at"),
-            "updated_at": review.get("updated_at"),
-            "preview_error": preview_error,
-            "thumb": f"/asset/thumb/{slug}/{quoted}",
-            "file": f"/asset/file/{slug}/{quoted}",
-        })
-    rows.sort(key=lambda row: (-row["mtime"], row["rel"].lower()))
     elapsed_ms = round((time.monotonic() - started) * 1000)
+    state = reconcile_catalog(slug, discoveries, truncated=truncated, reason=reason, elapsed_ms=elapsed_ms)
+    rows = _gallery_rows(slug, catalog_records(slug, present_only=True))
     if truncated:
         LOGGER.warning("collection scan truncated slug=%s reason=%s images=%s elapsed_ms=%s", slug, reason, len(rows), elapsed_ms)
-    return rows, {"truncated": truncated, "reason": reason, "elapsed_ms": elapsed_ms}
+    return rows, state | {"cached": False}
 
 
-def image_rows(slug: str) -> list[dict[str, Any]]:
-    return scan_collection(slug)[0]
+def image_rows(slug: str, force: bool = False) -> list[dict[str, Any]]:
+    return scan_collection(slug, force=force)[0]
 
 
-def _placeholder_thumbnail(path: Path, reason: str) -> bytes:
-    destination = thumb_path(path)
+def _placeholder_preview(path: Path, reason: str, size: tuple[int, int], destination: Path) -> bytes:
     if destination.exists():
         return destination.read_bytes()
-    image = Image.new("RGB", (640, 480), (18, 20, 24))
+    width, height = size
+    image = Image.new("RGB", size, (18, 20, 24))
     draw = ImageDraw.Draw(image)
     label = "SVG" if path.suffix.lower() == ".svg" else "PREVIEW"
-    draw.rounded_rectangle((42, 42, 598, 438), radius=22, outline=(78, 85, 98), width=3)
-    draw.text((70, 76), label, fill=(235, 238, 243))
-    draw.text((70, 225), path.name[:72], fill=(235, 238, 243))
-    draw.text((70, 260), reason[:88], fill=(145, 151, 163))
+    inset = max(28, min(width, height) // 12)
+    draw.rounded_rectangle((inset, inset, width - inset, height - inset), radius=max(16, inset // 2), outline=(78, 85, 98), width=3)
+    draw.text((inset + 28, inset + 28), label, fill=(235, 238, 243))
+    draw.text((inset + 28, height // 2 - 14), path.name[:72], fill=(235, 238, 243))
+    draw.text((inset + 28, height // 2 + 22), reason[:88], fill=(145, 151, 163))
     image.save(destination, "JPEG", quality=82, optimize=True)
     return destination.read_bytes()
 
 
-def make_thumbnail(path: Path) -> bytes:
-    if path.suffix.lower() == ".svg":
-        return _placeholder_thumbnail(path, "Safe placeholder — open original downloads the SVG")
-    destination = thumb_path(path)
+def _render_preview(path: Path, destination: Path, max_size: tuple[int, int]) -> bytes:
     if destination.exists():
         return destination.read_bytes()
-    # `path` is supplied only after `safe_file()` containment validation.
-    if path.stat().st_size > MAX_THUMBNAIL_SOURCE_BYTES:
-        return _placeholder_thumbnail(path, "Preview skipped: file exceeds configured size limit")
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", Image.DecompressionBombWarning)
-            with Image.open(path) as image:
-                if image.width * image.height > MAX_IMAGE_PIXELS:
-                    return _placeholder_thumbnail(path, "Preview skipped: image exceeds configured pixel limit")
-                image = ImageOps.exif_transpose(image)
-                image.thumbnail((640, 480), Image.Resampling.LANCZOS)
-                if image.mode not in ("RGB", "L"):
-                    background = Image.new("RGB", image.size, (17, 17, 17))
-                    if "A" in image.getbands():
-                        background.paste(image, mask=image.getchannel("A"))
-                    else:
-                        background.paste(image.convert("RGB"))
-                    image = background
-                elif image.mode == "L":
-                    image = image.convert("RGB")
-                image.save(destination, "JPEG", quality=82, optimize=True)
-        return destination.read_bytes()
-    except (OSError, ValueError, Image.DecompressionBombWarning, Image.DecompressionBombError) as exc:
-        LOGGER.warning("thumbnail generation failed for %s: %s", path, exc)
-        return _placeholder_thumbnail(path, "Preview unavailable: invalid or unsupported image")
+    placeholder_size = (640, 480) if max(max_size) <= 640 else (1280, 900)
+    if path.suffix.lower() == ".svg":
+        return _placeholder_preview(path, "Safe placeholder — open original downloads the SVG", placeholder_size, destination)
+    with THUMBNAIL_SEMAPHORE:
+        if destination.exists():
+            return destination.read_bytes()
+        if path.stat().st_size > MAX_THUMBNAIL_SOURCE_BYTES:
+            return _placeholder_preview(path, "Preview skipped: file exceeds configured size limit", placeholder_size, destination)
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", Image.DecompressionBombWarning)
+                with Image.open(path) as image:
+                    if image.width * image.height > MAX_IMAGE_PIXELS:
+                        return _placeholder_preview(path, "Preview skipped: image exceeds configured pixel limit", placeholder_size, destination)
+                    image = ImageOps.exif_transpose(image)
+                    image.thumbnail(max_size, Image.Resampling.LANCZOS)
+                    if image.mode not in ("RGB", "L"):
+                        background = Image.new("RGB", image.size, (17, 17, 17))
+                        if "A" in image.getbands():
+                            background.paste(image, mask=image.getchannel("A"))
+                        else:
+                            background.paste(image.convert("RGB"))
+                        image = background
+                    elif image.mode == "L":
+                        image = image.convert("RGB")
+                    image.save(destination, "JPEG", quality=84, optimize=True)
+            return destination.read_bytes()
+        except (OSError, ValueError, Image.DecompressionBombWarning, Image.DecompressionBombError) as exc:
+            LOGGER.warning("preview generation failed for %s: %s", path, exc)
+            return _placeholder_preview(path, "Preview unavailable: invalid or unsupported image", placeholder_size, destination)
+
+
+def make_thumbnail(path: Path) -> bytes:
+    return _render_preview(path, thumb_path(path), (640, 480))
+
+
+def make_review_preview(path: Path) -> bytes:
+    return _render_preview(path, preview_path(path), (2048, 2048))
 
 
 class AssetViewerHandler(BaseHTTPRequestHandler):
@@ -335,22 +454,35 @@ class AssetViewerHandler(BaseHTTPRequestHandler):
             return self._static("app.js", "application/javascript; charset=utf-8")
         if path == "/api/session":
             return self._send_json(200, {"csrf": getattr(self.server, "csrf_token", ""), "version": __version__})
+        if path == "/api/capabilities":
+            return self._send_json(200, capability_document())
         if path == "/api/gallery":
             rows = collections()
             query = urllib.parse.parse_qs(parsed.query)
             active = (query.get("collection") or [rows[0]["slug"] if rows else ""])[0]
             if active and not any(row["slug"] == active for row in rows):
                 return self._send_json(404, {"error": "collection not found"})
-            public_rows = [{"slug": row["slug"], "label": row["label"]} for row in rows]
-            images, scan = scan_collection(active) if active else ([], {"truncated": False, "reason": None, "elapsed_ms": 0})
+            public_rows = [{"slug": row["slug"], "label": row["label"], "available": bool(row.get("available", True))} for row in rows]
+            force_scan = (query.get("refresh") or [""])[0].lower() in {"1", "true", "yes"}
+            images, scan = scan_collection(active, force=force_scan) if active else ([], {"truncated": False, "reason": None, "elapsed_ms": 0, "cached": True})
             review_state = collection_review_state(active) if active else None
             return self._send_json(200, {"collections": public_rows, "active": active, "images": images, "scan": scan, "review_state": review_state})
         if path == "/api/reviews":
             query = urllib.parse.parse_qs(parsed.query)
             collection = (query.get("collection") or [None])[0]
             status = (query.get("status") or [None])[0]
+            present_only = (query.get("present") or [""])[0].lower() in {"1", "true", "yes"}
             try:
-                return self._send_json(200, review_manifest(collection, status))
+                return self._send_json(200, review_manifest(collection, status, include_missing=not present_only))
+            except ValueError as exc:
+                return self._send_json(400, {"error": str(exc)})
+        if path == "/api/events":
+            query = urllib.parse.parse_qs(parsed.query)
+            collection = (query.get("collection") or [None])[0]
+            try:
+                after_id = int((query.get("after") or ["0"])[0])
+                limit = int((query.get("limit") or ["100"])[0])
+                return self._send_json(200, review_events_since(collection, after_id, limit))
             except ValueError as exc:
                 return self._send_json(400, {"error": str(exc)})
         if path == "/api/pending":
@@ -364,10 +496,13 @@ class AssetViewerHandler(BaseHTTPRequestHandler):
             query = urllib.parse.parse_qs(parsed.query)
             collection = (query.get("collection") or [""])[0]
             rel = (query.get("rel") or [""])[0]
+            asset_id = (query.get("asset_id") or [""])[0]
+            if asset_id and collection and not rel:
+                rel = asset_rel(collection, asset_id) or ""
             if not root_for(collection) or not rel:
-                return self._send_json(400, {"error": "collection and rel are required"})
+                return self._send_json(400, {"error": "collection plus rel or asset_id are required"})
             return self._send_json(200, {"collection": collection, "rel": rel, "events": review_history(collection, rel)})
-        if path.startswith("/asset/file/") or path.startswith("/asset/thumb/"):
+        if path.startswith("/asset/file/") or path.startswith("/asset/thumb/") or path.startswith("/asset/preview/"):
             parts = path.split("/", 4)
             if len(parts) != 5:
                 return self._send(404, "text/plain; charset=utf-8", "Not found")
@@ -376,13 +511,21 @@ class AssetViewerHandler(BaseHTTPRequestHandler):
             if not source:
                 return self._send(404, "text/plain; charset=utf-8", "Not found")
             if kind == "thumb":
-                return self._send(200, "image/jpeg", make_thumbnail(source), {"Cache-Control": "public, max-age=86400"})
+                return self._send(200, "image/jpeg", make_thumbnail(source), {"Cache-Control": "private, max-age=86400"})
+            if kind == "preview":
+                return self._send(200, "image/jpeg", make_review_preview(source), {"Cache-Control": "private, max-age=86400"})
             if source.suffix.lower() == ".svg":
                 filename = urllib.parse.quote(source.name, safe="")
                 return self._send_path(200, "application/octet-stream", source, {"Cache-Control": "private, max-age=3600", "Content-Disposition": f"attachment; filename*=UTF-8''{filename}"})
             content_type = mimetypes.guess_type(source.name)[0] or "application/octet-stream"
             return self._send_path(200, content_type, source, {"Cache-Control": "private, max-age=3600"})
         return self._send(404, "text/plain; charset=utf-8", "Not found")
+
+    def _payload_rel(self, slug: str, payload: dict[str, Any]) -> str:
+        rel = str(payload.get("rel", ""))
+        if not rel and payload.get("asset_id"):
+            rel = asset_rel(slug, str(payload.get("asset_id"))) or ""
+        return rel
 
     def do_POST(self) -> None:
         if not self._guard():
@@ -405,7 +548,7 @@ class AssetViewerHandler(BaseHTTPRequestHandler):
                     status = str(payload.get("status", ""))
                     changed = set_reviews_batch(slug, rels, status)
                     return self._send_json(200, {"ok": True, "changed": changed, "status": status})
-                rel = str(payload.get("rel", ""))
+                rel = self._payload_rel(slug, payload)
                 if not safe_file(slug, rel):
                     raise ValueError("asset not found")
                 status = str(payload.get("status", ""))
@@ -415,7 +558,7 @@ class AssetViewerHandler(BaseHTTPRequestHandler):
                 set_review(slug, rel, status, comment)
                 return self._send_json(200, {"ok": True, "status": status})
             if path == "/api/comment":
-                rel = str(payload.get("rel", ""))
+                rel = self._payload_rel(slug, payload)
                 comment = payload.get("comment", "")
                 if not safe_file(slug, rel) or not isinstance(comment, str):
                     raise ValueError("invalid comment request")
@@ -437,7 +580,7 @@ class AssetViewerHandler(BaseHTTPRequestHandler):
                 state = reopen_collection_review(slug)
                 return self._send_json(200, {"ok": True, "review_state": state})
             if path == "/api/undo":
-                rel = str(payload.get("rel", ""))
+                rel = self._payload_rel(slug, payload)
                 if not safe_file(slug, rel):
                     raise ValueError("asset not found")
                 result = undo_last_review(slug, rel)
@@ -459,17 +602,25 @@ def serve(
     trusted_hosts: list[str] | None = None,
     auth_password: str | None = None,
     log_level: str = "INFO",
+    allow_unauthenticated_remote: bool = False,
 ) -> None:
     logging.basicConfig(level=getattr(logging, log_level.upper(), logging.INFO), format="%(asctime)s %(levelname)s %(name)s %(message)s")
     normalized = {h.lower().rstrip(".") for h in (trusted_hosts or []) if h}
+    effective_password = auth_password or os.environ.get("ASSET_VIEWER_PASSWORD")
     if host in LOOPBACK_HOSTS:
         normalized |= LOOPBACK_HOSTS
-    elif not normalized:
-        raise ValueError("non-loopback binds require at least one --trusted-host")
+    else:
+        if not normalized:
+            raise ValueError("non-loopback binds require at least one --trusted-host")
+        if not effective_password and not allow_unauthenticated_remote:
+            raise ValueError(
+                "non-loopback binds require ASSET_VIEWER_PASSWORD/--auth-password equivalent; "
+                "use --allow-unauthenticated-remote only behind a trusted private/authenticated boundary"
+            )
     server = ThreadingHTTPServer((host, port), AssetViewerHandler)
     server.trusted_hosts = normalized
     server.csrf_token = secrets.token_urlsafe(32)
-    server.auth_password = auth_password or os.environ.get("ASSET_VIEWER_PASSWORD")
+    server.auth_password = effective_password
     LOGGER.info("Asset Viewer %s running at http://%s:%s auth=%s", __version__, host, port, "enabled" if server.auth_password else "disabled")
     try:
         server.serve_forever()

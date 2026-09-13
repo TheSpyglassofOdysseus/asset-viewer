@@ -60,10 +60,40 @@ class CliWorkflowTests(unittest.TestCase):
         self.assertEqual(pending.returncode, 0)
         self.assertFalse(json.loads(pending.stdout)["pending"])
 
+    def test_capabilities_json(self):
+        result = self.run_cli("capabilities", "--json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["protocol_version"], 1)
+        self.assertTrue(payload["features"]["stable_asset_ids"])
+        self.assertTrue(payload["features"]["event_feed"])
+
     def test_collection_url(self):
         result = self.run_cli("collection-url", "images", "--base-url", "https://viewer.example.test/base/")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "https://viewer.example.test/base/c/images")
+
+    def test_asset_url_uses_stable_asset_id(self):
+        from asset_viewer.app import scan_collection
+        scan_collection("images", force=True)
+        asset = storage.catalog_records("images")[0]
+        result = self.run_cli("asset-url", "images", asset["rel"], "--base-url", "https://viewer.example.test")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), f"https://viewer.example.test/c/images?asset={asset['asset_id']}")
+
+    def test_events_and_wait_for_review_cli(self):
+        storage.set_review("images", "a.png", "approved")
+        events = self.run_cli("events", "--collection", "images", "--json")
+        self.assertEqual(events.returncode, 0, events.stderr)
+        payload = json.loads(events.stdout)
+        self.assertEqual(payload["events"][0]["action"], "review")
+        pending = self.run_cli("wait-for-review", "--collection", "images", "--timeout", "0", "--no-scan", "--json")
+        self.assertEqual(pending.returncode, 2)
+        storage.set_review("images", "b.png", "approved")
+        storage.complete_collection_review("images")
+        done = self.run_cli("wait-for-review", "--collection", "images", "--timeout", "0", "--no-scan", "--json")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertFalse(json.loads(done.stdout)["pending"])
 
     def test_history_and_undo_cli(self):
         storage.set_review("images", "a.png", "maybe", comment="first")

@@ -80,3 +80,32 @@ If a human changes their mind, Asset Viewer records review events and supports u
 asset-viewer history brand-concepts concept-17.png --json
 asset-viewer undo brand-concepts concept-17.png
 ```
+
+
+## Event-driven consumption
+
+Long-running agents do not need to repeatedly diff full manifests. Read ordered events using a cursor:
+
+```bash
+asset-viewer events --collection brand-concepts --after 42 --json
+```
+
+For orchestration that should stop until the reviewer explicitly finishes:
+
+```bash
+asset-viewer wait-for-review --collection brand-concepts --timeout 900 --json
+```
+
+A successful wait is stronger than "there are files in the folder": it requires a complete filesystem scan, present assets, classifications for every current asset, and explicit human completion. If source bytes change after approval or a file disappears, the collection becomes pending again.
+
+## Stable identity and deep links
+
+Each cataloged asset receives a stable UUID. An unambiguous same-filesystem rename keeps the same identity, review history, and decision. Replacing the file contents invalidates the old decision.
+
+Use a stable asset link when handing one exact item to a human:
+
+```bash
+asset-viewer asset-url brand-concepts concept-17.png --base-url https://viewer.example.com
+```
+
+Manifests retain deleted assets as `present: false` tombstones by default so an agent can distinguish deletion from omission. Use `--present-only` when only the current filesystem set matters.
