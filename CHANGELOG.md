@@ -11,6 +11,7 @@ Context-and-handoff release.
 - Add metadata-aware browser search plus provenance exposure in review manifests, HTTP API, CLI, and MCP v2.
 - Add a human-readable Activity view backed by the existing durable event stream, with recent-event slicing for long histories.
 - Add exact approved-set handoff manifests plus optional explicit copy export; source originals are never moved or rewritten and public handoff payloads do not expose absolute server paths.
+- Fail approved handoff closed when current source bytes no longer match the reviewed SHA-256; copy export re-verifies streamed bytes before atomically publishing each destination file.
 - Add metadata-only collection grouping for nested navigation without reorganizing source directories.
 - Add autosaved review notes with asset-identity capture so rapid navigation cannot save a note onto the wrong asset.
 - Expand regression coverage for smart-control UI invariants, provenance, Activity, grouped collections, approved handoff, CLI/API/MCP parity, recent-event ordering, and autosave identity safety.

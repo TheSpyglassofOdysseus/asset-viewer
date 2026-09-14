@@ -59,6 +59,7 @@ asset-viewer metadata brand-concepts concept-17.png --set model=imagegen --set r
 ### `GET /api/handoff?collection=<slug>`
 
 Returns the exact present approved set with stable asset IDs, relative paths, review SHA-256, comments, annotations, family state, and provenance. It deliberately omits absolute server source paths.
+Handoff generation fails closed when current source bytes no longer match the stored review SHA-256; copy-out re-verifies the streamed bytes before publishing each destination file.
 
 Equivalent CLI:
 

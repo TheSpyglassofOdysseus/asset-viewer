@@ -1,10 +1,12 @@
 import os
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from asset_viewer import storage
 from asset_viewer.activity import activity_feed
+import asset_viewer.handoff as handoff_module
 from asset_viewer.handoff import approved_handoff, copy_approved_set
 
 
@@ -87,6 +89,27 @@ class V08ContextHandoffTests(unittest.TestCase):
         self.assertEqual(copied["copied"], ["concept.png"])
         self.assertEqual((destination / "concept.png").read_bytes(), b"asset-viewer-v08")
         self.assertEqual((self.images / "concept.png").read_bytes(), b"asset-viewer-v08")
+
+    def test_handoff_fails_closed_if_approved_bytes_change(self):
+        storage.set_review("concepts", "concept.png", "approved")
+        (self.images / "concept.png").write_bytes(b"changed-after-review")
+        with self.assertRaisesRegex(ValueError, "bytes changed since review"):
+            approved_handoff("concepts")
+
+    def test_copy_handoff_reverifies_bytes_while_copying(self):
+        storage.set_review("concepts", "concept.png", "approved")
+        real_handoff = handoff_module.approved_handoff
+
+        def mutate_after_manifest(collection):
+            payload = real_handoff(collection)
+            (self.images / "concept.png").write_bytes(b"changed-after-manifest")
+            return payload
+
+        destination = Path(self.tmp.name) / "race-copy"
+        with mock.patch("asset_viewer.handoff.approved_handoff", side_effect=mutate_after_manifest):
+            with self.assertRaisesRegex(ValueError, "bytes changed during handoff"):
+                copy_approved_set("concepts", str(destination))
+        self.assertFalse((destination / "concept.png").exists())
 
 
 if __name__ == "__main__":
