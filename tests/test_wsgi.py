@@ -180,6 +180,17 @@ class WsgiTests(unittest.TestCase):
         self.assertEqual(headers["Content-Type"], "image/png")
         self.assertGreater(len(original), 20)
 
+    def test_human_review_report_route(self):
+        self.request("GET", "/api/gallery", query="collection=samples&refresh=1")
+        storage.set_review("samples", "sample.png", "approved", comment="ready")
+        status, headers, body = self.request("GET", "/report", query="collection=samples&present=1&images=0")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Content-Type"], "text/html; charset=utf-8")
+        self.assertIn("style-src 'unsafe-inline'", headers["Content-Security-Policy"])
+        self.assertIn("default-src 'none'", headers["Content-Security-Policy"])
+        self.assertIn(b"Asset Viewer Review Report", body)
+        self.assertIn(b"ready", body)
+
     def test_unsupported_method_is_405(self):
         status, headers, _ = self.request("PUT", "/api/review")
         self.assertEqual(status, 405)

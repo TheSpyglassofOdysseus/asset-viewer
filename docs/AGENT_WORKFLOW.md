@@ -121,3 +121,8 @@ asset-viewer asset-url brand-concepts concept-17.png --base-url https://viewer.e
 ```
 
 Manifests retain deleted assets as `present: false` tombstones by default so an agent can distinguish deletion from omission. Use `--present-only` when only the current filesystem set matters.
+
+
+## MCP adapter
+
+Asset Viewer v0.7 can expose the same durable review protocol through an optional MCP v2 adapter. Install the optional dependency and run `asset-viewer mcp` (stdio by default). The MCP layer is an adapter only: SQLite/catalog/review state remains canonical, and agents receive the same collections, manifests, pending/completion state, events, annotations, families, stable URLs, and refresh semantics already available through the CLI/API.

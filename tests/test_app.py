@@ -32,6 +32,11 @@ class AppTests(unittest.TestCase):
         os.environ.pop("ASSET_VIEWER_CACHE", None)
         self.tmp.cleanup()
 
+    def test_gallery_script_polls_catalog_generation(self):
+        script = (Path(__file__).parents[1] / "asset_viewer" / "static" / "app.js").read_text()
+        self.assertIn("async function pollCatalog()", script)
+        self.assertIn("catalogGeneration", script)
+
     def test_gallery_includes_select_all_control(self):
         html = (Path(__file__).parents[1] / "asset_viewer" / "static" / "index.html").read_text()
         js = (Path(__file__).parents[1] / "asset_viewer" / "static" / "app.js").read_text()

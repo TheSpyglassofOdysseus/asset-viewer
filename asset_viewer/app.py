@@ -112,6 +112,9 @@ def capability_document() -> dict[str, Any]:
             "explicit_completion": True,
             "event_feed": True,
             "filesystem_lifecycle_events": True,
+            "filesystem_watcher": True,
+            "review_report": True,
+            "mcp_adapter": True,
             "wait_for_review_cli": True,
             "asset_deep_links": True,
             "spatial_annotations": True,
@@ -501,9 +504,9 @@ class AssetViewerHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
-        for key, value in self._security_headers().items():
-            self.send_header(key, value)
-        for key, value in (extra or {}).items():
+        headers = self._security_headers()
+        headers.update(extra or {})
+        for key, value in headers.items():
             self.send_header(key, value)
         self.end_headers()
         try:
@@ -520,9 +523,9 @@ class AssetViewerHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(path.stat().st_size))
-        for key, value in self._security_headers().items():
-            self.send_header(key, value)
-        for key, value in (extra or {}).items():
+        headers = self._security_headers()
+        headers.update(extra or {})
+        for key, value in headers.items():
             self.send_header(key, value)
         self.end_headers()
         try:
@@ -579,6 +582,30 @@ class AssetViewerHandler(BaseHTTPRequestHandler):
             review_state = collection_review_state(active) if active else None
             families = families_for_collection(active, include_missing=False) if active else []
             return self._send_json(200, {"collections": public_rows, "active": active, "images": images, "families": families, "scan": scan, "review_state": review_state})
+        if path == "/report":
+            query = urllib.parse.parse_qs(parsed.query)
+            collection = (query.get("collection") or [None])[0]
+            status = (query.get("status") or [None])[0]
+            present_only = (query.get("present") or ["1"])[0].lower() in {"1", "true", "yes"}
+            embed_images = (query.get("images") or ["1"])[0].lower() not in {"0", "false", "no"}
+            force_scan = (query.get("refresh") or [""])[0].lower() in {"1", "true", "yes"}
+            if collection and not any(row["slug"] == collection for row in collections()):
+                return self._send_json(404, {"error": "collection not found"})
+            try:
+                if force_scan:
+                    if collection:
+                        scan_collection(collection, force=True)
+                    else:
+                        for row in collections():
+                            scan_collection(row["slug"], force=True)
+                from .report import render_review_report
+                report = render_review_report(
+                    review_manifest(collection, status, include_missing=not present_only),
+                    format="html", embed_images=embed_images,
+                )
+                return self._send(200, "text/html; charset=utf-8", report, {"Cache-Control": "no-store", "Content-Security-Policy": "default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'"})
+            except ValueError as exc:
+                return self._send_json(400, {"error": str(exc)})
         if path == "/api/reviews":
             query = urllib.parse.parse_qs(parsed.query)
             collection = (query.get("collection") or [None])[0]
@@ -795,6 +822,9 @@ def serve(
     auth_password: str | None = None,
     log_level: str = "INFO",
     allow_unauthenticated_remote: bool = False,
+    watch: bool = True,
+    watch_debounce: float = 0.75,
+    watch_reconcile_interval: float = 60.0,
 ) -> None:
     logging.basicConfig(level=getattr(logging, log_level.upper(), logging.INFO), format="%(asctime)s %(levelname)s %(name)s %(message)s")
     normalized = {h.lower().rstrip(".") for h in (trusted_hosts or []) if h}
@@ -813,10 +843,21 @@ def serve(
     server.trusted_hosts = normalized
     server.csrf_token = secrets.token_urlsafe(32)
     server.auth_password = effective_password
-    LOGGER.info("Asset Viewer %s running at http://%s:%s auth=%s", __version__, host, port, "enabled" if server.auth_password else "disabled")
+    watcher = None
+    if watch:
+        from .watcher import start_collection_watcher
+        watcher = start_collection_watcher(
+            scan_collection, debounce_seconds=watch_debounce, reconcile_interval=watch_reconcile_interval
+        )
+    LOGGER.info(
+        "Asset Viewer %s running at http://%s:%s auth=%s watcher=%s",
+        __version__, host, port, "enabled" if server.auth_password else "disabled", "enabled" if watcher else "disabled",
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        if watcher:
+            watcher.stop()
         server.server_close()

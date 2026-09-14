@@ -139,6 +139,17 @@ class CliWorkflowTests(unittest.TestCase):
         self.assertEqual(pruned.returncode, 0, pruned.stderr)
         self.assertEqual(json.loads(pruned.stdout)["files"], 1)
 
+    def test_human_report_cli(self):
+        from asset_viewer.app import scan_collection
+        scan_collection("images", force=True)
+        storage.set_review("images", "a.png", "approved", comment="ship")
+        output = Path(self.tmp.name) / "review.md"
+        result = self.run_cli("report", "--collection", "images", "--format", "markdown", "--output", str(output))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = output.read_text()
+        self.assertIn("Asset Viewer Review Report", text)
+        self.assertIn("a.png — Approved", text)
+
     def test_history_and_undo_cli(self):
         storage.set_review("images", "a.png", "maybe", comment="first")
         storage.set_review("images", "a.png", "approved", comment="second")

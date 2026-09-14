@@ -13,6 +13,8 @@ from PIL import Image, ImageDraw, ImageFont
 from . import __version__
 from .app import LOOPBACK_HOSTS, capability_document, scan_collection, serve as development_serve
 from .wsgi import serve as production_serve
+from .report import render_review_report
+from .mcp_server import run_mcp
 from .storage import (
     add_collection,
     annotations_for_asset,
@@ -185,6 +187,16 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--no-scan", action="store_true")
     export.add_argument("--present-only", action="store_true", help="Exclude tombstoned/missing assets")
 
+    report = sub.add_parser("report", help="Export a human-readable review report")
+    report.add_argument("--collection")
+    report.add_argument("--status", choices=["approved", "maybe", "rejected", "unreviewed", "new"])
+    report.add_argument("--format", choices=["html", "markdown"], default="html")
+    report.add_argument("--output", default="-", help="Output file or - for stdout")
+    report.add_argument("--title", default="Asset Viewer Review Report")
+    report.add_argument("--no-scan", action="store_true")
+    report.add_argument("--present-only", action="store_true", help="Exclude tombstoned/missing assets")
+    report.add_argument("--no-images", action="store_true", help="Do not embed thumbnails in HTML reports")
+
     pending = sub.add_parser("pending", help="Report collections still waiting for human review")
     pending.add_argument("--collection")
     pending.add_argument("--json", action="store_true")
@@ -305,12 +317,24 @@ def build_parser() -> argparse.ArgumentParser:
     cache.add_argument("--max-age-days", type=int, default=int(os.environ.get("ASSET_VIEWER_CACHE_MAX_AGE_DAYS", "30")))
     cache.add_argument("--json", action="store_true")
 
+    watch = sub.add_parser("watch", help="Watch registered folders and reconcile changes immediately")
+    watch.add_argument("--debounce", type=float, default=0.75, help="Seconds to coalesce filesystem events")
+    watch.add_argument("--reconcile-interval", type=float, default=60.0, help="Periodic full reconciliation fallback")
+
+    mcp = sub.add_parser("mcp", help="Run the optional MCP adapter for agents")
+    mcp.add_argument("--transport", choices=["stdio", "streamable-http"], default="stdio")
+    mcp.add_argument("--host", default="127.0.0.1")
+    mcp.add_argument("--port", type=int, default=8161)
+
     run = sub.add_parser("serve", help="Run the web viewer")
     run.add_argument("--host", default="127.0.0.1")
     run.add_argument("--port", type=int, default=8160)
     run.add_argument("--trusted-host", action="append", default=[], help="Allowed Host header (repeatable). Required for non-loopback binds and reverse proxies.")
     run.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], default="INFO")
     run.add_argument("--http-threads", type=int, default=6, help="Waitress HTTP worker threads (default: 6)")
+    run.add_argument("--watch", action=argparse.BooleanOptionalAction, default=True, help="Watch registered folders for near-real-time updates")
+    run.add_argument("--watch-debounce", type=float, default=0.75, help="Seconds to coalesce filesystem events")
+    run.add_argument("--watch-reconcile-interval", type=float, default=60.0, help="Periodic full reconciliation fallback")
     run.add_argument("--development-server", action="store_true", help="Use the legacy stdlib development server instead of Waitress")
     run.add_argument(
         "--allow-unauthenticated-remote", action="store_true",
@@ -364,6 +388,18 @@ def main() -> None:
                 review_manifest(args.collection, args.status, include_missing=not args.present_only),
                 indent=2, sort_keys=True
             ) + "\n"
+            if args.output == "-":
+                sys.stdout.write(payload)
+            else:
+                Path(args.output).expanduser().write_text(payload)
+                print(f"Wrote {args.output}")
+        elif args.command == "report":
+            if not args.no_scan:
+                scan_registered(args.collection)
+            manifest = review_manifest(args.collection, args.status, include_missing=not args.present_only)
+            payload = render_review_report(
+                manifest, format=args.format, title=args.title, embed_images=not args.no_images
+            )
             if args.output == "-":
                 sys.stdout.write(payload)
             else:
@@ -537,16 +573,35 @@ def main() -> None:
                 print(f"files={payload['files']} bytes={payload['bytes']} path={payload['path']}")
                 if 'removed_files' in payload:
                     print(f"removed_files={payload['removed_files']} removed_bytes={payload['removed_bytes']}")
+        elif args.command == "watch":
+            from .watcher import start_collection_watcher
+            watcher = start_collection_watcher(
+                scan_collection, debounce_seconds=args.debounce, reconcile_interval=args.reconcile_interval
+            )
+            print("Watching registered Asset Viewer collections. Press Ctrl+C to stop.")
+            try:
+                while True:
+                    time.sleep(3600)
+            except KeyboardInterrupt:
+                pass
+            finally:
+                watcher.stop()
+        elif args.command == "mcp":
+            run_mcp(args.transport, host=args.host, port=args.port)
         elif args.command == "serve":
             if args.development_server:
                 development_serve(
                     args.host, args.port, args.trusted_host, log_level=args.log_level,
                     allow_unauthenticated_remote=args.allow_unauthenticated_remote,
+                    watch=args.watch, watch_debounce=args.watch_debounce,
+                    watch_reconcile_interval=args.watch_reconcile_interval,
                 )
             else:
                 production_serve(
                     args.host, args.port, args.trusted_host, log_level=args.log_level,
                     allow_unauthenticated_remote=args.allow_unauthenticated_remote, threads=args.http_threads,
+                    watch=args.watch, watch_debounce=args.watch_debounce,
+                    watch_reconcile_interval=args.watch_reconcile_interval,
                 )
         elif args.command == "doctor":
             raise SystemExit(doctor(args.host, args.trusted_host))
@@ -558,7 +613,7 @@ def main() -> None:
             print("Run: asset-viewer serve")
         else:
             parser.print_help()
-    except (ValueError, OSError) as exc:
+    except (ValueError, OSError, RuntimeError) as exc:
         parser.error(str(exc))
 
 
