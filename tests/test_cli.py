@@ -163,5 +163,26 @@ class CliWorkflowTests(unittest.TestCase):
         self.assertEqual(item["comment"], "first")
 
 
+    def test_v08_metadata_activity_and_handoff_cli(self):
+        from asset_viewer.app import scan_collection
+        scan_collection("images", force=True)
+        metadata = self.run_cli(
+            "metadata", "images", "a.png", "--set", "source_project=Whetstone",
+            "--set", "model=gpt-image", "--set", "run_id=cli-08", "--json",
+        )
+        self.assertEqual(metadata.returncode, 0, metadata.stderr)
+        self.assertEqual(json.loads(metadata.stdout)["run_id"], "cli-08")
+        storage.set_review("images", "a.png", "approved", comment="ship")
+        activity = self.run_cli("activity", "--collection", "images", "--json")
+        self.assertEqual(activity.returncode, 0, activity.stderr)
+        self.assertTrue(any("Provenance updated" in event["summary"] for event in json.loads(activity.stdout)["events"]))
+        output = Path(self.tmp.name) / "handoff.json"
+        handoff = self.run_cli("handoff", "images", "--output", str(output))
+        self.assertEqual(handoff.returncode, 0, handoff.stderr)
+        payload = json.loads(output.read_text())
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["items"][0]["provenance"]["source_project"], "Whetstone")
+
+
 if __name__ == "__main__":
     unittest.main()

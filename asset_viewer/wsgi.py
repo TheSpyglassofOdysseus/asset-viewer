@@ -16,6 +16,8 @@ from typing import Any, Callable, Iterable
 from waitress import serve as waitress_serve
 
 from . import __version__
+from .activity import activity_feed
+from .handoff import approved_handoff
 from .app import (
     BASE_CSP,
     LOOPBACK_HOSTS,
@@ -29,6 +31,8 @@ from .app import (
 )
 from .storage import (
     asset_rel,
+    asset_metadata,
+    set_asset_metadata,
     annotations_for_asset,
     create_annotation,
     delete_annotation,
@@ -262,7 +266,7 @@ class AssetViewerWSGI:
             active = (query.get("collection") or [rows[0]["slug"] if rows else ""])[0]
             if active and not any(row["slug"] == active for row in rows):
                 return _json_response(start_response, 404, {"error": "collection not found"})
-            public_rows = [{"slug": row["slug"], "label": row["label"], "available": bool(row.get("available", True))} for row in rows]
+            public_rows = [{"slug": row["slug"], "label": row["label"], "group": row.get("group", ""), "available": bool(row.get("available", True))} for row in rows]
             force_scan = (query.get("refresh") or [""])[0].lower() in {"1", "true", "yes"}
             images, scan = scan_collection(active, force=force_scan) if active else ([], {"truncated": False, "reason": None, "elapsed_ms": 0, "cached": True})
             review_state = collection_review_state(active) if active else None
@@ -301,6 +305,31 @@ class AssetViewerWSGI:
                 return _json_response(start_response, 200, review_manifest(collection, status, include_missing=not present_only))
             except ValueError as exc:
                 return _json_response(start_response, 400, {"error": str(exc)})
+        if path == "/api/activity":
+            collection = (query.get("collection") or [None])[0]
+            try:
+                after_id = int((query.get("after") or ["0"])[0])
+                limit = int((query.get("limit") or ["200"])[0])
+                return _json_response(start_response, 200, activity_feed(collection, after_id, limit))
+            except ValueError as exc:
+                return _json_response(start_response, 400, {"error": str(exc)})
+        if path == "/api/handoff":
+            collection = (query.get("collection") or [""])[0]
+            if not collection:
+                return _json_response(start_response, 400, {"error": "collection is required"})
+            try:
+                return _json_response(start_response, 200, approved_handoff(collection))
+            except ValueError as exc:
+                return _json_response(start_response, 400, {"error": str(exc)})
+        if path == "/api/metadata":
+            collection = (query.get("collection") or [""])[0]
+            asset = (query.get("asset") or query.get("asset_id") or [""])[0]
+            if not collection or not asset:
+                return _json_response(start_response, 400, {"error": "collection and asset are required"})
+            try:
+                return _json_response(start_response, 200, asset_metadata(collection, asset))
+            except ValueError as exc:
+                return _json_response(start_response, 404, {"error": str(exc)})
         if path == "/api/events":
             collection = (query.get("collection") or [None])[0]
             try:
@@ -394,6 +423,12 @@ class AssetViewerWSGI:
                     raise ValueError("comment must be a string")
                 set_review(slug, rel, status, comment)
                 return _json_response(start_response, 200, {"ok": True, "status": status})
+            if path == "/api/metadata":
+                asset = str(payload.get("asset_id") or payload.get("asset") or payload.get("rel") or "")
+                metadata = payload.get("metadata")
+                if not asset or not isinstance(metadata, dict):
+                    raise ValueError("asset and metadata object are required")
+                return _json_response(start_response, 200, {"ok": True, "metadata": set_asset_metadata(slug, asset, metadata)})
             if path == "/api/comment":
                 rel = self._payload_rel(slug, payload)
                 comment = payload.get("comment", "")

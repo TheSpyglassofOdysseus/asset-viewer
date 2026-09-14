@@ -40,6 +40,10 @@ class McpAdapterTests(unittest.TestCase):
         pending = mcp_server.get_pending("images")
         self.assertTrue(pending["pending"])
         self.assertIn("?asset=", mcp_server.get_asset_url("images", "asset.png"))
+        provenance = mcp_server.set_provenance("images", "asset.png", model="gpt-image", run_id="mcp-08")
+        self.assertEqual(provenance["run_id"], "mcp-08")
+        self.assertEqual(mcp_server.get_provenance("images", "asset.png")["model"], "gpt-image")
+        self.assertTrue(any("Provenance updated" in event["summary"] for event in mcp_server.get_activity("images")["events"]))
 
     @unittest.skipUnless(importlib.util.find_spec("mcp"), "optional mcp SDK is not installed")
     def test_mcp_v2_server_exposes_expected_tools(self):
@@ -47,6 +51,7 @@ class McpAdapterTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         names = {tool.name for tool in tools}
         self.assertTrue({"list_collections", "get_reviews", "get_pending", "get_events", "refresh_collections"} <= names)
+        self.assertTrue({"get_activity", "get_provenance", "set_provenance", "get_approved_handoff"} <= names)
 
 
 if __name__ == "__main__":

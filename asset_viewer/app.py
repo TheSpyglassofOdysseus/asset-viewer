@@ -23,9 +23,13 @@ from PIL import Image, ImageDraw
 
 from . import __version__
 from .preview_worker import inspect_images_worker, render_preview_worker
+from .activity import activity_feed
+from .handoff import approved_handoff
 from .storage import (
     IMAGE_EXTS,
     asset_rel,
+    asset_metadata,
+    set_asset_metadata,
     annotations_for_asset,
     create_annotation,
     update_annotation,
@@ -127,6 +131,11 @@ def capability_document() -> dict[str, Any]:
             "variant_families": True,
             "family_preferred_member": True,
             "family_events": True,
+            "asset_provenance": True,
+            "activity_view": True,
+            "approved_handoff": True,
+            "collection_groups": True,
+            "smart_action_menus": True,
         },
         "limits": {
             "max_scan_files": MAX_SCAN_FILES,
@@ -265,6 +274,7 @@ def _gallery_rows(slug: str, records: list[dict[str, Any]]) -> list[dict[str, An
             "family_id": record.get("family_id"),
             "family_name": record.get("family_name"),
             "family_preferred": bool(record.get("family_preferred")),
+            "provenance": record.get("provenance") or {},
             "thumb": f"/asset/thumb/{slug}/{quoted}",
             "preview": f"/asset/preview/{slug}/{quoted}",
             "file": f"/asset/file/{slug}/{quoted}",
@@ -576,7 +586,7 @@ class AssetViewerHandler(BaseHTTPRequestHandler):
             active = (query.get("collection") or [rows[0]["slug"] if rows else ""])[0]
             if active and not any(row["slug"] == active for row in rows):
                 return self._send_json(404, {"error": "collection not found"})
-            public_rows = [{"slug": row["slug"], "label": row["label"], "available": bool(row.get("available", True))} for row in rows]
+            public_rows = [{"slug": row["slug"], "label": row["label"], "group": row.get("group", ""), "available": bool(row.get("available", True))} for row in rows]
             force_scan = (query.get("refresh") or [""])[0].lower() in {"1", "true", "yes"}
             images, scan = scan_collection(active, force=force_scan) if active else ([], {"truncated": False, "reason": None, "elapsed_ms": 0, "cached": True})
             review_state = collection_review_state(active) if active else None
@@ -615,6 +625,34 @@ class AssetViewerHandler(BaseHTTPRequestHandler):
                 return self._send_json(200, review_manifest(collection, status, include_missing=not present_only))
             except ValueError as exc:
                 return self._send_json(400, {"error": str(exc)})
+        if path == "/api/activity":
+            query = urllib.parse.parse_qs(parsed.query)
+            collection = (query.get("collection") or [None])[0]
+            try:
+                after_id = int((query.get("after") or ["0"])[0])
+                limit = int((query.get("limit") or ["200"])[0])
+                return self._send_json(200, activity_feed(collection, after_id, limit))
+            except ValueError as exc:
+                return self._send_json(400, {"error": str(exc)})
+        if path == "/api/handoff":
+            query = urllib.parse.parse_qs(parsed.query)
+            collection = (query.get("collection") or [""])[0]
+            if not collection:
+                return self._send_json(400, {"error": "collection is required"})
+            try:
+                return self._send_json(200, approved_handoff(collection))
+            except ValueError as exc:
+                return self._send_json(400, {"error": str(exc)})
+        if path == "/api/metadata":
+            query = urllib.parse.parse_qs(parsed.query)
+            collection = (query.get("collection") or [""])[0]
+            asset = (query.get("asset") or query.get("asset_id") or [""])[0]
+            if not collection or not asset:
+                return self._send_json(400, {"error": "collection and asset are required"})
+            try:
+                return self._send_json(200, asset_metadata(collection, asset))
+            except ValueError as exc:
+                return self._send_json(404, {"error": str(exc)})
         if path == "/api/events":
             query = urllib.parse.parse_qs(parsed.query)
             collection = (query.get("collection") or [None])[0]
@@ -718,6 +756,12 @@ class AssetViewerHandler(BaseHTTPRequestHandler):
                     raise ValueError("comment must be a string")
                 set_review(slug, rel, status, comment)
                 return self._send_json(200, {"ok": True, "status": status})
+            if path == "/api/metadata":
+                asset = str(payload.get("asset_id") or payload.get("asset") or payload.get("rel") or "")
+                metadata = payload.get("metadata")
+                if not asset or not isinstance(metadata, dict):
+                    raise ValueError("asset and metadata object are required")
+                return self._send_json(200, {"ok": True, "metadata": set_asset_metadata(slug, asset, metadata)})
             if path == "/api/comment":
                 rel = self._payload_rel(slug, payload)
                 comment = payload.get("comment", "")

@@ -2,6 +2,20 @@
 
 All notable changes to Asset Viewer will be documented here.
 
+## 0.8.0 — 2026-09-13
+
+Context-and-handoff release.
+
+- Replace permanent action-button clutter with state selectors and context-aware Actions menus across gallery, selection, asset review, family, annotation, and compare workflows while preserving keyboard review.
+- Add optional per-asset provenance/generation metadata (`source_project`, tool, agent, model, prompt, seed, run ID, Git commit, parent asset, and bounded arbitrary JSON extras) without changing source-file ownership.
+- Add metadata-aware browser search plus provenance exposure in review manifests, HTTP API, CLI, and MCP v2.
+- Add a human-readable Activity view backed by the existing durable event stream, with recent-event slicing for long histories.
+- Add exact approved-set handoff manifests plus optional explicit copy export; source originals are never moved or rewritten and public handoff payloads do not expose absolute server paths.
+- Fail approved handoff closed when current source bytes no longer match the reviewed SHA-256; copy export re-verifies streamed bytes before atomically publishing each destination file.
+- Add metadata-only collection grouping for nested navigation without reorganizing source directories.
+- Add autosaved review notes with asset-identity capture so rapid navigation cannot save a note onto the wrong asset.
+- Expand regression coverage for smart-control UI invariants, provenance, Activity, grouped collections, approved handoff, CLI/API/MCP parity, recent-event ordering, and autosave identity safety.
+
 ## 0.7.0 — 2026-09-13
 
 Live-review-loop release.

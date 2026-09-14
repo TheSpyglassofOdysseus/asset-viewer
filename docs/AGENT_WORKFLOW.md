@@ -15,7 +15,7 @@ When an agent produces images:
 Example:
 
 ```bash
-asset-viewer add "$REPO/artifacts/brand-concepts" "Brand Concepts"
+asset-viewer add "$REPO/artifacts/brand-concepts" "Brand Concepts" --group "Project / Brand"
 ```
 
 Agent handoff:
@@ -69,6 +69,22 @@ asset-viewer families brand-concepts --json
 ```
 
 Family membership follows stable asset IDs across ordinary same-filesystem renames. Family create/add/remove/prefer/rename/delete actions also appear in the ordered event feed, so an agent can react to lineage and preference changes as structured feedback.
+
+## Provenance and approved handoff
+
+When generation context is available, attach it to the stable asset rather than encoding it into filenames or moving the original:
+
+```bash
+asset-viewer metadata brand-concepts concept-17.png --set source_project=Whetstone --set model=imagegen --set run_id=brand-007 --json
+```
+
+After review, consume the exact approved set with:
+
+```bash
+asset-viewer handoff brand-concepts --output approved-handoff.json
+```
+
+The handoff contains stable IDs, relative paths, review hashes, notes, annotations, family/preferred state, and provenance. It does not expose absolute server paths. `--copy-to` is available only when an explicit separate copy is wanted; originals remain untouched.
 
 ## Waiting for explicit human completion
 
@@ -125,4 +141,4 @@ Manifests retain deleted assets as `present: false` tombstones by default so an 
 
 ## MCP adapter
 
-Asset Viewer v0.7 can expose the same durable review protocol through an optional MCP v2 adapter. Install the optional dependency and run `asset-viewer mcp` (stdio by default). The MCP layer is an adapter only: SQLite/catalog/review state remains canonical, and agents receive the same collections, manifests, pending/completion state, events, annotations, families, stable URLs, and refresh semantics already available through the CLI/API.
+Asset Viewer v0.8 can expose the same durable review protocol through an optional MCP v2 adapter. Install the optional dependency and run `asset-viewer mcp` (stdio by default). The MCP layer is an adapter only: SQLite/catalog/review state remains canonical, and agents receive the same collections, manifests, pending/completion state, events, human Activity, provenance metadata, approved handoff, annotations, families, stable URLs, and refresh semantics already available through the CLI/API.

@@ -37,14 +37,23 @@ class AppTests(unittest.TestCase):
         self.assertIn("async function pollCatalog()", script)
         self.assertIn("catalogGeneration", script)
 
-    def test_gallery_includes_select_all_control(self):
+    def test_gallery_uses_smart_selectors_instead_of_action_button_farm(self):
         html = (Path(__file__).parents[1] / "asset_viewer" / "static" / "index.html").read_text()
         js = (Path(__file__).parents[1] / "asset_viewer" / "static" / "app.js").read_text()
-        self.assertIn('id="selectAll"', html)
+        for control_id in ("view", "actions", "selectionAction", "reviewStatus", "assetActions", "familyActions", "annotationMode"):
+            self.assertIn(f'id="{control_id}"', html)
+        for retired_id in ("selectAll", "reviewComplete", "report", "refresh", "saveComment", "showHistory", "copyPath", "copyReviewLink"):
+            self.assertNotIn(f'id="{retired_id}"', html)
         self.assertIn("function selectAllVisible()", js)
-        self.assertIn('id="reviewDecision"', html)
+        self.assertIn("function handleCollectionAction(value)", js)
+        self.assertIn("function handleAssetAction(value)", js)
         self.assertIn("function renderReviewDecision(asset)", js)
-        self.assertIn("decision-active", js)
+
+    def test_comment_autosave_captures_asset_identity(self):
+        script = (Path(__file__).parents[1] / "asset_viewer" / "static" / "app.js").read_text()
+        self.assertIn("const assetKey = keyFor(asset);", script)
+        self.assertIn("saveCommentSnapshot(assetKey, collection, assetId, comment)", script)
+        self.assertNotIn("setTimeout(() => saveComment().catch(showError), 650)", script)
 
     def test_image_discovery(self):
         rows = image_rows("samples")

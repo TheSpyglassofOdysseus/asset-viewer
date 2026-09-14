@@ -4,8 +4,12 @@ import json
 from typing import Any
 
 from .app import capability_document, scan_collection
+from .activity import activity_feed
+from .handoff import approved_handoff
 from .storage import (
     annotations_for_asset,
+    asset_metadata,
+    set_asset_metadata,
     catalog_records,
     catalog_state,
     collection_review_state,
@@ -34,6 +38,7 @@ def list_collections() -> dict[str, Any]:
         items.append({
             "slug": slug,
             "label": row["label"],
+            "group": row.get("group", ""),
             "available": bool(row.get("available")),
             "catalog": catalog_state(slug),
             "review": collection_review_state(slug),
@@ -106,6 +111,36 @@ def get_asset_url(collection: str, asset: str, base_url: str = "http://127.0.0.1
     return base_url.rstrip("/") + f"/c/{collection}?asset={record['asset_id']}"
 
 
+def get_activity(collection: str | None = None, after_id: int = 0, limit: int = 200) -> dict[str, Any]:
+    """Return human-readable activity backed by the durable event cursor."""
+    return activity_feed(collection, after_id, limit)
+
+
+def get_provenance(collection: str, asset: str) -> dict[str, Any]:
+    """Return optional generation/source metadata for one stable asset."""
+    return asset_metadata(collection, asset)
+
+
+def set_provenance(
+    collection: str, asset: str, source_project: str = "", tool: str = "", agent: str = "",
+    model: str = "", prompt: str = "", seed: str = "", run_id: str = "", git_commit: str = "",
+    parent_asset_id: str = "", extra_json: str = "{}",
+) -> dict[str, Any]:
+    """Attach optional provenance metadata without changing the source image."""
+    extra = json.loads(extra_json or "{}")
+    if not isinstance(extra, dict):
+        raise ValueError("extra_json must decode to an object")
+    return set_asset_metadata(collection, asset, {
+        "source_project": source_project, "tool": tool, "agent": agent, "model": model, "prompt": prompt,
+        "seed": seed, "run_id": run_id, "git_commit": git_commit, "parent_asset_id": parent_asset_id, "extra": extra,
+    })
+
+
+def get_approved_handoff(collection: str) -> dict[str, Any]:
+    """Return the exact human-approved handoff manifest without copying or moving originals."""
+    return approved_handoff(collection)
+
+
 def refresh_collections(collection: str | None = None) -> dict[str, Any]:
     """Run the normal bounded filesystem reconciliation and return catalog state."""
     _scan(collection)
@@ -130,6 +165,10 @@ def create_mcp_server():
     server.tool()(get_annotations)
     server.tool()(get_collection_url)
     server.tool()(get_asset_url)
+    server.tool()(get_activity)
+    server.tool()(get_provenance)
+    server.tool()(set_provenance)
+    server.tool()(get_approved_handoff)
     server.tool()(refresh_collections)
 
     @server.resource("asset-viewer://capabilities")
