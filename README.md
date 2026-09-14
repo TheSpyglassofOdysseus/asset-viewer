@@ -86,6 +86,28 @@ asset-viewer serve
 
 The demo command creates a small set of synthetic sample assets and registers them as a collection.
 
+### Live updates and reports
+
+`asset-viewer serve` watches registered folders by default. Filesystem events trigger the normal bounded reconciliation path, while periodic full reconciliation remains the correctness fallback. Use `--no-watch` to disable it or `asset-viewer watch` to run watching separately.
+
+The gallery **Report** button opens a printable review summary for the active collection. The same report is available from the CLI:
+
+```bash
+asset-viewer report --collection project-images --output review.html
+asset-viewer report --collection project-images --format markdown --output review.md
+```
+
+### Optional MCP adapter
+
+Install the optional MCP dependency and run the adapter over stdio:
+
+```bash
+pipx inject local-asset-viewer 'mcp>=2,<3'
+asset-viewer mcp
+```
+
+The MCP layer reuses the existing review protocol; it does not create a second database or review state. It exposes collection state, reviews, completion/pending state, ordered events, annotations, variant families, stable browser URLs, and explicit refresh tools.
+
 ## CLI
 
 ```text
@@ -111,12 +133,12 @@ asset-viewer family-add/remove ...    Maintain family membership
 asset-viewer family-prefer ...        Set/clear the preferred family member
 asset-viewer annotations SLUG ASSET List point/region feedback for one asset
 asset-viewer annotate ...            Create precise point/region feedback
-asset-viewer cache [status|prune]   Inspect/prune generated preview cache
-asset-viewer annotations SLUG ASSET List pinned spatial feedback
-asset-viewer annotate ...           Create point/region feedback for agents
-asset-viewer annotation-update ...  Resolve/reopen/edit an annotation
-asset-viewer annotation-delete ...  Delete an annotation
 asset-viewer cache [status|prune]    Inspect/prune generated preview cache
+asset-viewer report ...              Export a printable HTML/Markdown review report
+asset-viewer watch                   Watch registered folders and reconcile changes
+asset-viewer mcp                     Run the optional MCP adapter for agents
+asset-viewer annotation-update ...   Resolve/reopen/edit an annotation
+asset-viewer annotation-delete ...   Delete an annotation
 asset-viewer doctor                Check state and deployment prerequisites
 asset-viewer serve                 Start the web viewer
 asset-viewer demo                  Create/register synthetic demo assets
@@ -246,7 +268,7 @@ asset-viewer serve --port 8160
 
 The roadmap is organized around a deliberate progression: **production hardening → human/agent feedback → agent-native automation → serious creative review → collaboration**.
 
-The core machine-readable human→agent loop now includes precise point/region feedback, linked comparison controls, and durable variant/version families. The next product frontier is near-real-time filesystem watching, generation/provenance metadata adapters, review-report export, and push/MCP adapters while preserving the local-first review-plane boundary.
+The core machine-readable human→agent loop now includes precise point/region feedback, linked comparison controls, durable variant/version families, live filesystem watching, printable review reports, and an optional MCP adapter. The next product frontier is generation/provenance metadata, stronger identity for collaborative deployments, and signed release provenance while preserving the local-first review-plane boundary.
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the phased feature/benefit analysis and roadmap.
 

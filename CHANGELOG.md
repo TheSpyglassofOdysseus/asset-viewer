@@ -2,6 +2,19 @@
 
 All notable changes to Asset Viewer will be documented here.
 
+## 0.7.0 — 2026-09-13
+
+Live-review-loop release.
+
+- Add an optional watchdog-backed filesystem watcher that runs with `asset-viewer serve` by default, coalesces filesystem churn, and retains periodic full reconciliation as the correctness fallback.
+- Add `asset-viewer watch` for a standalone watcher process and watcher capability reporting.
+- Add human-readable review reports in printable HTML or Markdown, including decisions, comments, annotations, variant-family context, and optional embedded thumbnails.
+- Add a visible **Report** control in the gallery plus an authenticated `/report` route and `asset-viewer report` CLI command.
+- Add an optional MCP v2 adapter over the existing durable review protocol, exposing collections, reviews, pending/completion state, ordered events, annotations, families, stable URLs, and explicit refresh without creating a second source of truth.
+- Keep MCP optional via `local-asset-viewer[mcp]`; the normal viewer remains lightweight.
+- Add regression coverage for real filesystem events, report escaping/output, report HTTP/CLI flows, and actual MCP v2 server tool registration.
+- Refresh pinned GitHub Actions on current `main` before the v0.7 feature branch, avoiding stale maintenance history.
+
 ## 0.6.2 — 2026-09-13
 
 Selection workflow patch.

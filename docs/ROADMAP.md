@@ -20,7 +20,7 @@ Target: make private/server deployments robust enough to recommend confidently.
 
 - [x] Waitress is the default production serving layer; the stdlib server is explicit development-only fallback.
 - [x] Review/comment/seen state and the asset catalog are transactional SQLite with migrations, stable UUID asset IDs, and SHA-256-bound non-empty review decisions.
-- [~] Durable catalog + cached reads, tombstones, content-change invalidation, and rename reconciliation are implemented; a filesystem watcher remains open for immediate discovery without explicit/TTL rescans.
+- [x] Durable catalog + cached reads, tombstones, content-change invalidation, rename reconciliation, and optional filesystem watching are implemented; periodic full reconciliation remains the correctness fallback.
 - [x] Image byte/pixel/scan limits, bounded concurrency, disposable preview/metadata worker processes, timeout termination, and best-effort POSIX memory/file limits are implemented.
 - [x] SVG previews are inert JPEG placeholders and originals are forced downloads.
 - [~] CSRF/origin protections and trusted hosts are implemented; direct non-loopback serving now requires Basic auth unless an operator explicitly acknowledges another trusted access boundary. Stronger proxy identity/session auth remains open.
@@ -69,11 +69,13 @@ asset-viewer export-manifest      # implemented
 asset-viewer asset-url             # implemented
 ```
 
-Ordered review events are implemented with stable asset IDs. Family lifecycle/preferred-member changes now join that feed. Future webhook/MCP adapters can translate events such as review, comment, content-change, family changes, collection-complete, and collection-reopen into push-based integrations without changing the core database contract.
+Ordered review events are implemented with stable asset IDs. Family lifecycle/preferred-member changes join that feed, and the optional MCP adapter exposes the same protocol directly to agents without changing the core database contract. A future webhook adapter can translate those events into push workflows when needed.
 
 The intended loop is:
 
 **Generate → register/publish folder → notify human → review → consume feedback → regenerate.**
+
+- [x] Optional MCP v2 adapter over collections, reviews, pending state, events, annotations, families, stable URLs, and refresh.
 
 ## P3 — serious creative review
 
@@ -83,7 +85,7 @@ Target: support high-volume visual iteration without becoming an editor or DAM.
 - [~] Filename/path search is implemented; metadata search remains open.
 - [~] Sort by time/name/status/file-size/resolution is implemented; type/generation-metadata sorting remains open.
 - Prompt/model/generation metadata display where available.
-- Contact-sheet export.
+- [x] Printable human-readable HTML/Markdown review report with optional embedded thumbnails.
 - [x] Point/region annotations with normalized coordinates, resolve/reopen state, content-bound staleness, manifest/API/CLI exposure, and agent-readable events.
 - [x] Side-by-side, overlay, and difference comparison views with linked/independent zoom and pan.
 - [x] Version/variant families with stable-ID membership, preferred/latest semantics, manifest/API/CLI exposure, family events, and direct family comparison.

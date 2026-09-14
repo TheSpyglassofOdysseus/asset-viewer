@@ -98,9 +98,10 @@ def _bytes_response(
     extra: dict[str, str] | None = None,
 ) -> list[bytes]:
     data = body if isinstance(body, bytes) else body.encode("utf-8")
-    headers = [("Content-Type", content_type), ("Content-Length", str(len(data))), *security_headers()]
-    headers.extend((extra or {}).items())
-    start_response(_status_line(status), headers)
+    headers = {"Content-Type": content_type, "Content-Length": str(len(data))}
+    headers.update(dict(security_headers()))
+    headers.update(extra or {})
+    start_response(_status_line(status), list(headers.items()))
     return [data]
 
 
@@ -267,6 +268,31 @@ class AssetViewerWSGI:
             review_state = collection_review_state(active) if active else None
             families = families_for_collection(active, include_missing=False) if active else []
             return _json_response(start_response, 200, {"collections": public_rows, "active": active, "images": images, "families": families, "scan": scan, "review_state": review_state})
+        if path == "/report":
+            collection = (query.get("collection") or [None])[0]
+            status = (query.get("status") or [None])[0]
+            present_only = (query.get("present") or ["1"])[0].lower() in {"1", "true", "yes"}
+            embed_images = (query.get("images") or ["1"])[0].lower() not in {"0", "false", "no"}
+            force_scan = (query.get("refresh") or [""])[0].lower() in {"1", "true", "yes"}
+            if collection and not any(row["slug"] == collection for row in collections()):
+                return _json_response(start_response, 404, {"error": "collection not found"})
+            try:
+                if force_scan:
+                    if collection:
+                        scan_collection(collection, force=True)
+                    else:
+                        for row in collections():
+                            scan_collection(row["slug"], force=True)
+                from .report import render_review_report
+                report = render_review_report(
+                    review_manifest(collection, status, include_missing=not present_only),
+                    format="html", embed_images=embed_images,
+                )
+                return _bytes_response(
+                    start_response, 200, "text/html; charset=utf-8", report, {"Cache-Control": "no-store", "Content-Security-Policy": "default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'"}
+                )
+            except ValueError as exc:
+                return _json_response(start_response, 400, {"error": str(exc)})
         if path == "/api/reviews":
             collection = (query.get("collection") or [None])[0]
             status = (query.get("status") or [None])[0]
@@ -503,15 +529,31 @@ def serve(
     log_level: str = "INFO",
     allow_unauthenticated_remote: bool = False,
     threads: int = 6,
+    watch: bool = True,
+    watch_debounce: float = 0.75,
+    watch_reconcile_interval: float = 60.0,
 ) -> None:
     logging.basicConfig(level=getattr(logging, log_level.upper(), logging.INFO), format="%(asctime)s %(levelname)s %(name)s %(message)s")
     app = create_app(host, trusted_hosts, auth_password, allow_unauthenticated_remote)
-    LOGGER.info("Asset Viewer %s running with Waitress at http://%s:%s auth=%s", __version__, host, port, "enabled" if app.auth_password else "disabled")
-    waitress_serve(
-        app,
-        host=host,
-        port=port,
-        threads=max(1, min(int(threads), 64)),
-        clear_untrusted_proxy_headers=True,
-        expose_tracebacks=False,
+    watcher = None
+    if watch:
+        from .watcher import start_collection_watcher
+        watcher = start_collection_watcher(
+            scan_collection, debounce_seconds=watch_debounce, reconcile_interval=watch_reconcile_interval
+        )
+    LOGGER.info(
+        "Asset Viewer %s running with Waitress at http://%s:%s auth=%s watcher=%s",
+        __version__, host, port, "enabled" if app.auth_password else "disabled", "enabled" if watcher else "disabled",
     )
+    try:
+        waitress_serve(
+            app,
+            host=host,
+            port=port,
+            threads=max(1, min(int(threads), 64)),
+            clear_untrusted_proxy_headers=True,
+            expose_tracebacks=False,
+        )
+    finally:
+        if watcher:
+            watcher.stop()

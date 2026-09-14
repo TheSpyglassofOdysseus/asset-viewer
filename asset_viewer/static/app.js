@@ -16,6 +16,7 @@ let state = {
   compareLinked: true,
   compareTransforms: [],
   compareDrag: null,
+  catalogGeneration: 0,
 };
 
 const $ = selector => document.querySelector(selector);
@@ -76,6 +77,7 @@ async function load(requested, force = false) {
   state.families = data.families || [];
   state.active = data.active;
   state.reviewState = data.review_state;
+  state.catalogGeneration = Number((data.scan || {}).generation || 0);
   state.selected.clear();
   renderCollections(data.active);
   applyFilter();
@@ -818,6 +820,7 @@ $('#collection').onchange = () => {
 $('#filter').onchange = applyFilter;
 $('#sort').onchange = applyFilter;
 $('#search').oninput = applyFilter;
+$('#report').onclick = () => { if (state.active) window.open(`/report?collection=${encodeURIComponent(state.active)}&present=1&refresh=1`, '_blank', 'noopener'); };
 $('#refresh').onclick = () => load(state.active, true).catch(showError);
 $('#selectAll').onclick = selectAllVisible;
 $('#reviewComplete').onclick = () => toggleComplete().catch(showError);
@@ -875,6 +878,17 @@ document.onkeydown = event => {
   else if (event.key.toLowerCase() === 'r') review('rejected').catch(showError);
 };
 
+async function pollCatalog() {
+  if (document.hidden || !state.active || state.selected.size) return;
+  if (!modal.classList.contains('hidden') || !compareModal.classList.contains('hidden')) return;
+  const params = new URLSearchParams({collection: state.active});
+  const response = await fetch('/api/gallery?' + params, {cache: 'no-store'});
+  if (!response.ok) return;
+  const data = await response.json();
+  const generation = Number((data.scan || {}).generation || 0);
+  if (generation !== state.catalogGeneration) await load(state.active);
+}
+
 function showError(error) {
   console.error(error);
   $('#summary').textContent = error.message || 'Viewer error';
@@ -884,6 +898,7 @@ function showError(error) {
   try {
     await session();
     await load(collectionFromLocation());
+    setInterval(() => pollCatalog().catch(error => console.error(error)), 2000);
   } catch (error) {
     showError(error);
   }
