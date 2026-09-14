@@ -41,6 +41,32 @@ asset-viewer reviews --collection brand-concepts --json
 asset-viewer export-manifest --collection brand-concepts --output review.json
 ```
 
+### `GET /api/activity?collection=<slug>&limit=<n>`
+
+Returns the newest human-readable activity slice for a collection, using the same durable event records as `/api/events`. This is a presentation view; cursor-based automation should continue using `/api/events`.
+
+### `GET /api/metadata?collection=<slug>&asset=<id-or-rel>`
+
+Returns optional provenance/generation metadata for one stable asset. Fields include source project, tool, agent, model, prompt, seed, run ID, Git commit, parent asset ID, and bounded arbitrary JSON `extra` metadata. Metadata is review context only; it never changes the original file.
+
+Equivalent CLI:
+
+```bash
+asset-viewer metadata brand-concepts concept-17.png --json
+asset-viewer metadata brand-concepts concept-17.png --set model=imagegen --set run_id=brand-007 --json
+```
+
+### `GET /api/handoff?collection=<slug>`
+
+Returns the exact present approved set with stable asset IDs, relative paths, review SHA-256, comments, annotations, family state, and provenance. It deliberately omits absolute server source paths.
+
+Equivalent CLI:
+
+```bash
+asset-viewer handoff brand-concepts --output approved-handoff.json
+asset-viewer handoff brand-concepts --copy-to ./approved-export
+```
+
 ### `GET /api/events?collection=<slug>&after=<id>&limit=<n>`
 
 Returns ordered review/system events after an event cursor. This is the preferred polling primitive for long-running agents because callers can persist `last_event_id` and request only later events. In addition to review/comment/completion activity, v0.4 emits filesystem lifecycle actions such as `asset_added`, `asset_renamed`, `content_changed`, `asset_missing`, and `asset_restored`; event `details` carries action-specific metadata such as old/new paths.
@@ -106,6 +132,7 @@ Browser mutations use JSON POST requests and require the session CSRF token from
 - `POST /api/undo` — undo the most recent user review/comment change
 - `POST /api/annotation` — create/update/delete point or region feedback
 - `POST /api/family` — create/rename/delete a family, add/remove members, or set/clear its preferred member
+- `POST /api/metadata` — attach/update optional provenance metadata for a known asset
 
 Third-party automation should normally use the CLI for mutations unless it deliberately implements the browser security contract. Read APIs and CLI exports are designed as the stable integration surface first.
 
@@ -132,6 +159,8 @@ The generated asset link uses the stable UUID, so ordinary same-filesystem renam
 - Non-empty review decisions are bound to a SHA-256 fingerprint (`review_sha256`) of the reviewed bytes. Replacing the bytes at an existing path invalidates the previous status/comment and makes the asset new again—even when size and nanosecond mtime are preserved and the replacement is detected by fingerprint reconciliation.
 - Deleted assets are tombstoned rather than silently removed from manifests.
 - Variant families are review metadata only: grouping never moves, renames, copies, or deletes source files. Family membership follows stable asset IDs across detected renames.
+- Provenance metadata and collection groups are context/navigation metadata only and never reorganize originals.
+- Approved handoff payloads use relative paths and stable IDs; optional copy export is explicit and never moves or rewrites the source set.
 - Truncated/incomplete scans cannot declare missing files or produce a completed review state.
 
 ## Runtime capabilities

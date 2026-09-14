@@ -42,7 +42,11 @@ No import job. No duplicate asset library. No requirement to upload the batch to
 - **Explicit review completion** with automation-friendly pending state.
 - **Review history and undo** for status/comment decisions.
 - **Stable asset IDs, SHA-256 review fingerprints, and durable cataloging** so review state survives renames while replacements/deletions invalidate stale completion safely.
-- **Filename/path search and sorting** for growing collections.
+- **Metadata-aware search and sorting** across filenames, paths, notes, family names, and optional provenance fields such as project/model/prompt/run ID.
+- **Human-readable Activity view** backed by the same durable event stream agents consume.
+- **Approved-set handoff manifests** with exact stable IDs, hashes, decisions, annotations, family/preferred state, and provenance; optional copying is explicit and never mutates originals.
+- **Grouped collection navigation** that organizes the viewer without moving project folders.
+- **Context-aware selectors and menus** so capabilities grow without turning the toolbar into a button farm.
 - **Keyboard review**: arrow keys to navigate; `A`, `M`, `R` to classify.
 - **Multiple collections** behind one viewer URL.
 - **Recursive discovery** of PNG, JPEG, WebP, GIF, AVIF, BMP, and SVG assets.
@@ -90,7 +94,7 @@ The demo command creates a small set of synthetic sample assets and registers th
 
 `asset-viewer serve` watches registered folders by default. Filesystem events trigger the normal bounded reconciliation path, while periodic full reconciliation remains the correctness fallback. Use `--no-watch` to disable it or `asset-viewer watch` to run watching separately.
 
-The gallery **Report** button opens a printable review summary for the active collection. The same report is available from the CLI:
+The collection **Actions** menu opens a printable review summary for the active collection. The same report is available from the CLI:
 
 ```bash
 asset-viewer report --collection project-images --output review.html
@@ -111,7 +115,7 @@ The MCP layer reuses the existing review protocol; it does not create a second d
 ## CLI
 
 ```text
-asset-viewer add PATH [LABEL]      Register an image folder
+asset-viewer add PATH [LABEL]      Register an image folder (`--group` optionally groups navigation)
 asset-viewer remove SLUG|PATH      Remove a collection
 asset-viewer list                  List registered folders
 asset-viewer capabilities --json   Describe the stable agent/API contract
@@ -135,6 +139,9 @@ asset-viewer annotations SLUG ASSET List point/region feedback for one asset
 asset-viewer annotate ...            Create precise point/region feedback
 asset-viewer cache [status|prune]    Inspect/prune generated preview cache
 asset-viewer report ...              Export a printable HTML/Markdown review report
+asset-viewer metadata SLUG ASSET ... Read/update optional provenance metadata
+asset-viewer activity ...            Read recent human-readable collection activity
+asset-viewer handoff SLUG ...        Export the exact approved asset set
 asset-viewer watch                   Watch registered folders and reconcile changes
 asset-viewer mcp                     Run the optional MCP adapter for agents
 asset-viewer annotation-update ...   Resolve/reopen/edit an annotation
@@ -147,7 +154,7 @@ asset-viewer demo                  Create/register synthetic demo assets
 Common server usage:
 
 ```bash
-asset-viewer add /srv/renders/acme "Acme Renders"
+asset-viewer add /srv/renders/acme "Acme Renders" --group "Client / Acme"
 asset-viewer add /home/me/project/output "Project Output"
 asset-viewer list
 asset-viewer serve --host 127.0.0.1 --port 8160
@@ -179,6 +186,8 @@ asset-viewer pending --collection project-images --json
 # exit code 0 = review explicitly completed
 
 asset-viewer reviews --collection project-images --json
+asset-viewer metadata project-images concept-17.png --set model=imagegen --set run_id=brand-007 --json
+asset-viewer handoff project-images --output approved-handoff.json
 asset-viewer events --collection project-images --after 0 --json
 asset-viewer wait-for-review --collection project-images --timeout 900 --json
 asset-viewer collection-url project-images --base-url https://viewer.example.com
@@ -268,7 +277,7 @@ asset-viewer serve --port 8160
 
 The roadmap is organized around a deliberate progression: **production hardening → human/agent feedback → agent-native automation → serious creative review → collaboration**.
 
-The core machine-readable human→agent loop now includes precise point/region feedback, linked comparison controls, durable variant/version families, live filesystem watching, printable review reports, and an optional MCP adapter. The next product frontier is generation/provenance metadata, stronger identity for collaborative deployments, and signed release provenance while preserving the local-first review-plane boundary.
+The core human→agent loop now includes precise annotations, linked comparison, variant families, live watching, printable reports, optional provenance metadata, a human Activity view, exact approved-set handoff, grouped collection navigation, and an optional MCP adapter. The next product frontier is project-native registration/adapters, saved views/command palette, webhook integration, stronger identity for collaborative deployments, and signed release provenance while preserving the local-first review-plane boundary.
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the phased feature/benefit analysis and roadmap.
 

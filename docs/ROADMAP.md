@@ -36,7 +36,7 @@ Target: make review decisions directly useful to the next agent turn.
 - [x] JSON review manifest and `asset-viewer reviews --json`.
 - [x] Stable collection URLs in the browser (`/c/<slug>`) plus `asset-viewer collection-url`.
 - [x] Batch selection and bulk Approve / Maybe / Reject.
-- [x] Side-by-side compare mode for 2–4 assets. Synchronized zoom/pan remains open.
+- [x] Side-by-side compare mode for 2–4 assets with linked or independent zoom/pan.
 - [x] New/unseen-since-discovery state.
 - [x] Review history and undo for status/comment changes.
 - [x] Exportable filtered manifests plus `asset-viewer pending --json` with explicit completion exit codes.
@@ -82,16 +82,16 @@ The intended loop is:
 Target: support high-volume visual iteration without becoming an editor or DAM.
 
 - [x] Zoom/pan with linked or independent transforms across comparison panes.
-- [~] Filename/path search is implemented; metadata search remains open.
+- [x] Filename/path/note/family search plus optional project/tool/agent/model/prompt/run provenance search are implemented.
 - [~] Sort by time/name/status/file-size/resolution is implemented; type/generation-metadata sorting remains open.
-- Prompt/model/generation metadata display where available.
+- [x] Optional prompt/model/generation provenance metadata is stored separately from originals and exposed in the detail view, manifest, API, CLI, and MCP.
 - [x] Printable human-readable HTML/Markdown review report with optional embedded thumbnails.
 - [x] Point/region annotations with normalized coordinates, resolve/reopen state, content-bound staleness, manifest/API/CLI exposure, and agent-readable events.
 - [x] Side-by-side, overlay, and difference comparison views with linked/independent zoom and pan.
 - [x] Version/variant families with stable-ID membership, preferred/latest semantics, manifest/API/CLI exposure, family events, and direct family comparison.
-- Nested collection navigation.
-- [~] Per-asset review history and ordered machine event feed are implemented; human-facing collection activity view remains open.
-- Export/copy approved sets without changing source-of-truth semantics.
+- [x] Metadata-only grouped collection navigation (without moving source directories).
+- [x] Per-asset review history, ordered machine event feed, and human-facing collection Activity view are implemented.
+- [x] Export/copy approved sets without changing source-of-truth semantics; manifests avoid absolute source-path disclosure.
 
 Variant families are now implemented for generative workflows:
 

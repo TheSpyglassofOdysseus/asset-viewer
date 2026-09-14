@@ -161,6 +161,37 @@ class WsgiTests(unittest.TestCase):
         self.assertEqual(len(gallery["families"]), 1)
         self.assertTrue(any(asset["family_preferred"] for asset in gallery["images"]))
 
+    def test_v08_metadata_activity_handoff_and_grouped_gallery(self):
+        storage.add_collection(str(self.images), "Samples", group="Whetstone / Brand")
+        status, _, body = self.request("GET", "/api/gallery", query="collection=samples&refresh=1")
+        self.assertEqual(status, 200)
+        gallery = json.loads(body)
+        self.assertEqual(gallery["collections"][0]["group"], "Whetstone / Brand")
+        asset = gallery["images"][0]
+        origin = "http://127.0.0.1:8160"
+        status, _, body = self.request(
+            "POST", "/api/metadata", origin=origin,
+            body={"collection": "samples", "asset": asset["asset_id"], "metadata": {"model": "gpt-image", "run_id": "v08-1"}},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["metadata"]["model"], "gpt-image")
+        self.request(
+            "POST", "/api/review", origin=origin,
+            body={"collection": "samples", "asset_id": asset["asset_id"], "status": "approved", "comment": "winner"},
+        )
+        status, _, body = self.request("GET", "/api/activity", query="collection=samples")
+        self.assertEqual(status, 200)
+        summaries = [event["summary"] for event in json.loads(body)["events"]]
+        self.assertTrue(any("Provenance updated" in summary for summary in summaries))
+        status, _, body = self.request("GET", "/api/handoff", query="collection=samples")
+        self.assertEqual(status, 200)
+        handoff = json.loads(body)
+        self.assertEqual(handoff["count"], 1)
+        self.assertNotIn("source_root", handoff)
+        self.assertNotIn("source_path", handoff["items"][0])
+        self.assertNotIn(str(self.images.resolve()), body.decode())
+        self.assertEqual(handoff["items"][0]["provenance"]["run_id"], "v08-1")
+
     def test_cross_origin_post_is_rejected(self):
         status, _, _ = self.request(
             "POST", "/api/review", origin="https://attacker.example",

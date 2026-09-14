@@ -187,6 +187,7 @@ def _connect() -> sqlite3.Connection:
         )
         _migrate_legacy_reviews(conn)
         _ensure_catalog_schema(conn)
+        _ensure_context_schema(conn)
         conn.commit()
     try:
         path.chmod(0o600)
@@ -268,6 +269,33 @@ def _ensure_catalog_schema(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE catalog_state ADD COLUMN {name} {declaration}")
 
 
+def _ensure_context_schema(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS asset_metadata (
+            asset_id TEXT PRIMARY KEY,
+            collection TEXT NOT NULL,
+            source_project TEXT NOT NULL DEFAULT '',
+            tool TEXT NOT NULL DEFAULT '',
+            agent TEXT NOT NULL DEFAULT '',
+            model TEXT NOT NULL DEFAULT '',
+            prompt TEXT NOT NULL DEFAULT '',
+            seed TEXT NOT NULL DEFAULT '',
+            run_id TEXT NOT NULL DEFAULT '',
+            git_commit TEXT NOT NULL DEFAULT '',
+            parent_asset_id TEXT,
+            extra_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_asset_metadata_collection ON asset_metadata(collection, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_asset_metadata_model ON asset_metadata(model);
+        CREATE INDEX IF NOT EXISTS idx_asset_metadata_run ON asset_metadata(run_id);
+        """
+    )
+
+
+
 def _migrate_legacy_reviews(conn: sqlite3.Connection) -> None:
     done = conn.execute("SELECT value FROM meta WHERE key='legacy_reviews_migrated'").fetchone()
     if done:
@@ -322,6 +350,7 @@ def collections() -> list[dict[str, Any]]:
                 "slug": str(row["slug"]),
                 "label": str(row["label"]),
                 "path": str(path),
+                "group": str(row.get("group") or "").strip(),
                 "available": path.is_dir(),
             })
         except (KeyError, TypeError, OSError):
@@ -329,7 +358,7 @@ def collections() -> list[dict[str, Any]]:
     return valid
 
 
-def add_collection(path: str, label: str | None = None) -> dict[str, Any]:
+def add_collection(path: str, label: str | None = None, group: str | None = None) -> dict[str, Any]:
     resolved = Path(path).expanduser().resolve()
     if not resolved.is_dir():
         raise ValueError(f"not a directory: {resolved}")
@@ -345,11 +374,12 @@ def add_collection(path: str, label: str | None = None) -> dict[str, Any]:
     while slug in used:
         slug = f"{base}-{n}"
         n += 1
-    row = {"slug": slug, "label": label, "path": str(resolved), "available": True}
+    clean_group = str(group if group is not None else (existing or {}).get("group", "")).strip()
+    row = {"slug": slug, "label": label, "path": str(resolved), "group": clean_group, "available": True}
     rows = [r for r in rows if Path(r["path"]) != resolved]
     rows.append(row)
-    rows.sort(key=lambda r: r["label"].lower())
-    _atomic_json(registry_path(), [{"slug": r["slug"], "label": r["label"], "path": r["path"]} for r in rows])
+    rows.sort(key=lambda r: (r.get("group", "").lower(), r["label"].lower()))
+    _atomic_json(registry_path(), [{"slug": r["slug"], "label": r["label"], "path": r["path"], **({"group": r.get("group", "")} if r.get("group") else {})} for r in rows])
     return row
 
 
@@ -363,7 +393,7 @@ def remove_collection(key: str) -> dict[str, Any]:
     if not match:
         raise ValueError(f"collection not found: {key}")
     kept = [r for r in rows if r != match]
-    _atomic_json(registry_path(), [{"slug": r["slug"], "label": r["label"], "path": r["path"]} for r in kept])
+    _atomic_json(registry_path(), [{"slug": r["slug"], "label": r["label"], "path": r["path"], **({"group": r.get("group", "")} if r.get("group") else {})} for r in kept])
     return match
 
 
@@ -383,6 +413,111 @@ def asset_rel(collection: str, asset_id: str) -> str | None:
             (collection, asset_id),
         ).fetchone()
     return str(row["rel"]) if row else None
+
+
+_METADATA_FIELDS = ("source_project", "tool", "agent", "model", "prompt", "seed", "run_id", "git_commit", "parent_asset_id")
+
+
+def _resolve_asset_row(conn: sqlite3.Connection, collection: str, asset: str) -> sqlite3.Row:
+    row = conn.execute(
+        "SELECT asset_id, collection, rel, present FROM assets WHERE collection=? AND (asset_id=? OR rel=?) LIMIT 1",
+        (collection, asset, asset),
+    ).fetchone()
+    if not row:
+        raise ValueError(f"asset not found: {asset}")
+    return row
+
+
+def _metadata_payload(row: sqlite3.Row | None, asset_id: str, collection: str) -> dict[str, Any]:
+    if not row:
+        return {"asset_id": asset_id, "collection": collection, **{key: "" for key in _METADATA_FIELDS}, "extra": {}, "created_at": None, "updated_at": None}
+    payload = {"asset_id": asset_id, "collection": collection}
+    for key in _METADATA_FIELDS:
+        payload[key] = row[key] or ""
+    try:
+        payload["extra"] = json.loads(row["extra_json"] or "{}")
+    except json.JSONDecodeError:
+        payload["extra"] = {}
+    payload["created_at"] = row["created_at"]
+    payload["updated_at"] = row["updated_at"]
+    return payload
+
+
+def asset_metadata(collection: str, asset: str) -> dict[str, Any]:
+    with _connection() as conn:
+        target = _resolve_asset_row(conn, collection, asset)
+        row = conn.execute("SELECT * FROM asset_metadata WHERE asset_id=?", (target["asset_id"],)).fetchone()
+        return _metadata_payload(row, str(target["asset_id"]), collection)
+
+
+def set_asset_metadata(collection: str, asset: str, metadata: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(metadata, dict):
+        raise ValueError("metadata must be an object")
+    unknown = set(metadata) - set(_METADATA_FIELDS) - {"extra"}
+    if unknown:
+        raise ValueError("unsupported metadata field(s): " + ", ".join(sorted(unknown)))
+    now = utc_now()
+    with _connection() as conn:
+        target = _resolve_asset_row(conn, collection, asset)
+        asset_id = str(target["asset_id"])
+        old = conn.execute("SELECT * FROM asset_metadata WHERE asset_id=?", (asset_id,)).fetchone()
+        old_payload = _metadata_payload(old, asset_id, collection)
+        clean: dict[str, str] = {}
+        for key in _METADATA_FIELDS:
+            value = metadata[key] if key in metadata else old_payload.get(key, "")
+            if value is None:
+                value = ""
+            if isinstance(value, (dict, list)):
+                raise ValueError(f"{key} must be a scalar value")
+            text = str(value).strip()
+            limit = 20000 if key == "prompt" else 1000
+            if len(text) > limit:
+                raise ValueError(f"{key} is too long")
+            clean[key] = text
+        extra = metadata["extra"] if "extra" in metadata else old_payload.get("extra", {})
+        if extra is None:
+            extra = {}
+        if not isinstance(extra, dict):
+            raise ValueError("extra metadata must be an object")
+        encoded_extra = json.dumps(extra, separators=(",", ":"), sort_keys=True)
+        if len(encoded_extra) > 50000:
+            raise ValueError("extra metadata is too large")
+        parent = clean["parent_asset_id"]
+        if parent:
+            parent_row = conn.execute("SELECT asset_id FROM assets WHERE asset_id=?", (parent,)).fetchone()
+            if not parent_row:
+                raise ValueError("parent_asset_id does not reference a known asset")
+        created = old["created_at"] if old else now
+        conn.execute(
+            """INSERT INTO asset_metadata(
+                asset_id, collection, source_project, tool, agent, model, prompt, seed, run_id, git_commit, parent_asset_id, extra_json, created_at, updated_at
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(asset_id) DO UPDATE SET
+                collection=excluded.collection, source_project=excluded.source_project, tool=excluded.tool, agent=excluded.agent,
+                model=excluded.model, prompt=excluded.prompt, seed=excluded.seed, run_id=excluded.run_id, git_commit=excluded.git_commit,
+                parent_asset_id=excluded.parent_asset_id, extra_json=excluded.extra_json, updated_at=excluded.updated_at
+            """,
+            (asset_id, collection, clean["source_project"], clean["tool"], clean["agent"], clean["model"], clean["prompt"],
+             clean["seed"], clean["run_id"], clean["git_commit"], parent or None, encoded_extra, created, now),
+        )
+        changed = [key for key in _METADATA_FIELDS if str(old_payload.get(key) or "") != clean[key]]
+        if old_payload.get("extra", {}) != extra:
+            changed.append("extra")
+        if changed:
+            _record_system_event(conn, collection, str(target["rel"]), asset_id, "metadata_updated", now, {"fields": sorted(changed)})
+        row = conn.execute("SELECT * FROM asset_metadata WHERE asset_id=?", (asset_id,)).fetchone()
+        return _metadata_payload(row, asset_id, collection)
+
+def metadata_map(collection: str | None = None) -> dict[str, dict[str, Any]]:
+    query = "SELECT * FROM asset_metadata"
+    args: tuple[Any, ...] = ()
+    if collection:
+        query += " WHERE collection=?"
+        args = (collection,)
+    with _connection() as conn:
+        rows = conn.execute(query, args).fetchall()
+    return {str(row["asset_id"]): _metadata_payload(row, str(row["asset_id"]), str(row["collection"])) for row in rows}
+
 
 
 def safe_file(slug: str, relative: str) -> Path | None:
@@ -477,7 +612,11 @@ def catalog_records(collection: str, present_only: bool = True) -> list[dict[str
         query += " AND present=1"
     query += " ORDER BY COALESCE(mtime_ns, 0) DESC, rel COLLATE NOCASE"
     with _connection() as conn:
-        return [dict(row) for row in conn.execute(query, tuple(args))]
+        records = [dict(row) for row in conn.execute(query, tuple(args))]
+    metadata = metadata_map(collection)
+    for record in records:
+        record["provenance"] = metadata.get(str(record["asset_id"]), _metadata_payload(None, str(record["asset_id"]), collection))
+    return records
 
 
 
@@ -1312,6 +1451,49 @@ def review_events_since(collection: str | None = None, after_id: int = 0, limit:
         "events": rows,
     }
 
+def recent_review_events(collection: str | None = None, limit: int = 200) -> dict[str, Any]:
+    """Return the newest durable events as an ascending chronological slice."""
+    limit = max(1, min(int(limit), 500))
+    with _connection() as conn:
+        if collection:
+            cursor = conn.execute(
+                """
+                SELECT id, collection, rel, asset_id, action, old_status, new_status,
+                       old_comment, new_comment, created_at, undone_at, details
+                FROM review_events WHERE collection=?
+                ORDER BY id DESC LIMIT ?
+                """,
+                (collection, limit),
+            )
+        else:
+            cursor = conn.execute(
+                """
+                SELECT id, collection, rel, asset_id, action, old_status, new_status,
+                       old_comment, new_comment, created_at, undone_at, details
+                FROM review_events ORDER BY id DESC LIMIT ?
+                """,
+                (limit,),
+            )
+        rows = []
+        for row in cursor:
+            item = dict(row)
+            try:
+                item["details"] = json.loads(item.get("details") or "{}")
+            except (TypeError, json.JSONDecodeError):
+                item["details"] = {}
+            rows.append(item)
+        newest = conn.execute("SELECT COALESCE(MAX(id), 0) AS value FROM review_events").fetchone()["value"]
+    rows.reverse()
+    return {
+        "version": 1,
+        "generated_at": utc_now(),
+        "after_id": 0,
+        "last_event_id": int(rows[-1]["id"] if rows else 0),
+        "newest_event_id": int(newest or 0),
+        "events": rows,
+    }
+
+
 def _record_collection_event(conn: sqlite3.Connection, collection: str, action: str, now: str) -> None:
     conn.execute(
         """
@@ -1492,6 +1674,7 @@ def review_manifest(collection: str | None = None, status: str | None = None, in
     query += " ORDER BY collection, rel"
     items = []
     annotations_by_asset: dict[str, list[dict[str, Any]]] = {}
+    metadata_by_asset = metadata_map(collection)
     with _connection() as conn:
         annotation_query = "SELECT annotation_id, asset_id, collection, kind, x, y, w, h, text, resolved, stale, content_sha256, created_at, updated_at FROM annotations"
         annotation_args: tuple[Any, ...] = ()
@@ -1519,6 +1702,7 @@ def review_manifest(collection: str | None = None, status: str | None = None, in
                 "width": row["width"],
                 "height": row["height"],
                 "review_sha256": row["review_sha256"],
+                "provenance": metadata_by_asset.get(str(row["asset_id"]), _metadata_payload(None, str(row["asset_id"]), str(row["collection"]))),
                 "family": ({"family_id": row["family_id"], "name": row["family_name"], "preferred": bool(row["family_preferred"])} if row["family_id"] else None),
                 "annotations": annotations_by_asset.get(str(row["asset_id"]), []),
                 "content_changed_at": row["content_changed_at"],

@@ -17,6 +17,8 @@ let state = {
   compareTransforms: [],
   compareDrag: null,
   catalogGeneration: 0,
+  view: 'gallery',
+  activityEvents: [],
 };
 
 const $ = selector => document.querySelector(selector);
@@ -105,10 +107,48 @@ async function load(requested, force = false) {
 
 function renderCollections(active) {
   const select = $('#collection');
-  select.innerHTML = state.collections.map(collection =>
-    `<option value="${esc(collection.slug)}">${esc(collection.label)}${collection.available === false ? ' — unavailable' : ''}</option>`
-  ).join('');
+  const grouped = new Map();
+  for (const collection of state.collections) {
+    const group = collection.group || '';
+    if (!grouped.has(group)) grouped.set(group, []);
+    grouped.get(group).push(collection);
+  }
+  const parts = [];
+  for (const [group, rows] of grouped) {
+    const options = rows.map(collection =>
+      `<option value="${esc(collection.slug)}">${esc(collection.label)}${collection.available === false ? ' — unavailable' : ''}</option>`
+    ).join('');
+    parts.push(group ? `<optgroup label="${esc(group)}">${options}</optgroup>` : options);
+  }
+  select.innerHTML = parts.join('');
   if (active && state.collections.some(collection => collection.slug === active)) select.value = active;
+}
+
+function provenanceText(asset) {
+  const p = asset.provenance || {};
+  const extra = p.extra && typeof p.extra === 'object' ? Object.values(p.extra) : [];
+  return [p.source_project, p.tool, p.agent, p.model, p.prompt, p.seed, p.run_id, p.git_commit, ...extra].filter(Boolean).join(' ').toLowerCase();
+}
+
+function assetSearchMatch(asset, query) {
+  if (!query) return true;
+  const terms = query.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
+  const p = asset.provenance || {};
+  const fields = {
+    status: asset.status || 'unreviewed', family: asset.family_name || '', project: p.source_project || '',
+    tool: p.tool || '', agent: p.agent || '', model: p.model || '', prompt: p.prompt || '', run: p.run_id || '',
+  };
+  const haystack = `${asset.name} ${asset.rel} ${asset.comment || ''} ${asset.family_name || ''} ${provenanceText(asset)}`.toLowerCase();
+  return terms.every(raw => {
+    const term = raw.replace(/^"|"$/g, '');
+    const split = term.indexOf(':');
+    if (split > 0) {
+      const key = term.slice(0, split).toLowerCase();
+      const value = term.slice(split + 1).replace(/^"|"$/g, '').toLowerCase();
+      if (key in fields) return String(fields[key]).toLowerCase().includes(value);
+    }
+    return haystack.includes(term.toLowerCase());
+  });
 }
 
 function applyFilter() {
@@ -118,8 +158,7 @@ function applyFilter() {
   let rows = state.images.filter(asset => {
     const statusMatch = filter === 'all' ||
       (filter === 'new' ? asset.is_new : (filter === 'unreviewed' ? !asset.status : asset.status === filter));
-    const haystack = `${asset.name} ${asset.rel} ${asset.comment || ''} ${asset.family_name || ''}`.toLowerCase();
-    return statusMatch && (!query || haystack.includes(query));
+    return statusMatch && assetSearchMatch(asset, query);
   });
   const rank = {'': 0, maybe: 1, approved: 2, rejected: 3};
   rows = [...rows].sort((a, b) => {
@@ -134,7 +173,7 @@ function applyFilter() {
   grid.innerHTML = rows.map((asset, index) => {
     const selected = state.selected.has(keyFor(asset));
     return `<article class="card ${selected ? 'selected' : ''}" data-i="${index}" tabindex="0">
-      <button class="select-toggle" data-select="${index}" type="button" aria-label="${selected ? 'Deselect' : 'Select'} ${esc(asset.name)}">${selected ? '✓' : '+'}</button>
+      <input class="select-toggle" data-select="${index}" type="checkbox" ${selected ? 'checked' : ''} aria-label="${selected ? 'Deselect' : 'Select'} ${esc(asset.name)}">
       <img class="thumb" loading="lazy" src="${esc(asset.thumb)}" alt="">
       <span class="badge ${esc(asset.status || '')}">${esc(asset.status || 'unreviewed')}</span>
       <div class="caption">
@@ -166,13 +205,11 @@ function applyFilter() {
   updateSelectAll();
 }
 
-function updateSelectAll() {
-  const button = $('#selectAll');
-  const visible = state.filtered.map(keyFor);
-  const allVisibleSelected = visible.length > 0 && visible.every(key => state.selected.has(key));
-  button.disabled = visible.length === 0 || allVisibleSelected;
-  button.textContent = allVisibleSelected ? 'All selected' : 'Select all';
-  button.title = visible.length ? `Select all ${visible.length} images in the current filtered view` : 'No images in the current view';
+function setMenu(select, placeholder, items) {
+  select.innerHTML = `<option value="">${esc(placeholder)}</option>` + items.map(item =>
+    `<option value="${esc(item.value)}"${item.disabled ? ' disabled' : ''}>${esc(item.label)}</option>`
+  ).join('');
+  select.value = '';
 }
 
 function selectAllVisible() {
@@ -189,43 +226,38 @@ function toggleSelection(index) {
   updateBulk();
 }
 
+function updateCollectionActions() {
+  const review = state.reviewState;
+  const items = [
+    {value: 'select-all', label: `Select all visible (${state.filtered.length})`, disabled: !state.filtered.length},
+    {value: 'report', label: 'Open review report'},
+    {value: 'handoff', label: 'Export approved handoff'},
+    {value: 'refresh', label: 'Refresh collection'},
+  ];
+  if (review && !review.scan_incomplete && !review.empty) {
+    if (review.complete) items.splice(1, 0, {value: 'reopen', label: 'Reopen review'});
+    else if (!review.unreviewed) items.splice(1, 0, {value: 'complete', label: review.stale ? 'Re-complete review' : 'Mark review complete'});
+  }
+  setMenu($('#actions'), 'Actions…', items);
+}
+
 function updateBulk() {
   const count = state.selected.size;
   $('#bulkbar').classList.toggle('hidden', count === 0);
   $('#selectedCount').textContent = `${count} selected`;
-  $('#compare').disabled = count < 2;
-  $('#groupVariants').disabled = count < 2;
-  updateSelectAll();
+  const items = [
+    {value: 'approve', label: 'Set Approved'}, {value: 'maybe', label: 'Set Maybe'},
+    {value: 'reject', label: 'Set Rejected'}, {value: 'clear-review', label: 'Clear review state'},
+    {value: 'compare', label: 'Compare', disabled: count < 2},
+    {value: 'group', label: 'Group as variants', disabled: count < 2},
+    {value: 'clear-selection', label: 'Clear selection'},
+  ];
+  setMenu($('#selectionAction'), 'Selected actions…', items);
+  updateCollectionActions();
 }
 
 function updateReviewState() {
-  const button = $('#reviewComplete');
-  const review = state.reviewState;
-  if (!review) {
-    button.disabled = true;
-    button.textContent = 'Review status';
-    return;
-  }
-  button.classList.toggle('complete-state', review.complete);
-  if (review.scan_incomplete) {
-    button.textContent = 'Scan incomplete';
-    button.disabled = true;
-  } else if (review.empty) {
-    button.textContent = 'No assets';
-    button.disabled = true;
-  } else if (review.complete) {
-    button.textContent = '✓ Review complete';
-    button.disabled = false;
-  } else if (review.unreviewed > 0) {
-    button.textContent = `${review.unreviewed} left to review`;
-    button.disabled = true;
-  } else if (review.stale) {
-    button.textContent = 'Re-complete review';
-    button.disabled = false;
-  } else {
-    button.textContent = 'Mark review complete';
-    button.disabled = false;
-  }
+  updateCollectionActions();
 }
 
 async function refreshReviewState() {
@@ -247,17 +279,43 @@ function renderReviewDecision(asset) {
   const indicator = $('#reviewDecision');
   indicator.textContent = labels[status] || status;
   indicator.className = `review-decision ${status ? `decision-${status}` : 'decision-unreviewed'}`;
-  document.querySelectorAll('.review button[data-status]').forEach(button => {
-    const selected = button.dataset.status === status;
-    button.classList.toggle('decision-active', selected);
-    button.setAttribute('aria-pressed', selected ? 'true' : 'false');
-  });
+  $('#reviewStatus').value = status;
+}
+
+function renderProvenance(asset) {
+  const p = asset?.provenance || {};
+  const rows = [
+    ['Project', p.source_project], ['Tool', p.tool], ['Agent', p.agent], ['Model', p.model],
+    ['Prompt', p.prompt], ['Seed', p.seed], ['Run', p.run_id], ['Git commit', p.git_commit],
+    ['Parent asset', p.parent_asset_id],
+  ].filter(([, value]) => value);
+  const extras = p.extra && typeof p.extra === 'object' ? Object.entries(p.extra) : [];
+  const content = $('#provenanceContent');
+  if (!rows.length && !extras.length) {
+    content.innerHTML = '<span class="muted">No provenance metadata attached.</span>';
+    return;
+  }
+  content.innerHTML = [...rows, ...extras].map(([key, value]) =>
+    `<div class="provenance-row"><strong>${esc(key)}</strong><span>${esc(value)}</span></div>`
+  ).join('');
+}
+
+function updateAssetActions(asset) {
+  const items = [
+    {value: 'history', label: 'Review history'},
+    {value: 'undo', label: 'Undo last review change'},
+    {value: 'copy-path', label: 'Copy relative path'},
+    {value: 'copy-link', label: 'Copy review link'},
+    {value: 'open-original', label: 'Open original'},
+  ];
+  setMenu($('#assetActions'), 'Actions…', items);
 }
 
 function renderFamilyRow(asset) {
   const row = $('#familyRow');
   if (!asset || !asset.family_id) {
     row.classList.add('hidden');
+    setMenu($('#familyActions'), 'Family…', []);
     return;
   }
   const family = familyById(asset.family_id);
@@ -265,9 +323,11 @@ function renderFamilyRow(asset) {
   const latest = family && family.latest_asset_id === asset.asset_id;
   $('#familyName').textContent = asset.family_name || (family && family.name) || 'Variant family';
   $('#familyMeta').textContent = `${count} variant${count === 1 ? '' : 's'}${asset.family_preferred ? ' · preferred' : ''}${latest ? ' · latest' : ''}`;
-  $('#setPreferred').disabled = Boolean(asset.family_preferred);
-  $('#setPreferred').textContent = asset.family_preferred ? 'Preferred' : 'Set preferred';
-  $('#compareFamily').disabled = count < 2;
+  setMenu($('#familyActions'), 'Family…', [
+    {value: 'compare', label: 'Compare family', disabled: count < 2},
+    {value: 'prefer', label: asset.family_preferred ? 'Already preferred' : 'Set as preferred', disabled: Boolean(asset.family_preferred)},
+    {value: 'leave', label: 'Remove from family'},
+  ]);
   row.classList.remove('hidden');
 }
 
@@ -279,10 +339,12 @@ function openAt(index, updateUrl = true) {
   $('#full').alt = asset.name;
   $('#filename').textContent = asset.name;
   $('#details').textContent = `${asset.rel} · ${asset.width || '?'}×${asset.height || '?'} · ${formatBytes(asset.size)}`;
-  $('#original').href = asset.file;
   $('#comment').value = asset.comment || '';
+  $('#commentState').textContent = 'Saved';
   renderReviewDecision(asset);
   renderFamilyRow(asset);
+  renderProvenance(asset);
+  updateAssetActions(asset);
   $('#historyPanel').classList.add('hidden');
   const notice = $('#previewNotice');
   notice.textContent = asset.preview_error || '';
@@ -325,6 +387,8 @@ function updateLocal(assetOrRel, patch) {
 async function review(status) {
   const asset = state.filtered[state.current];
   const comment = $('#comment').value;
+  clearTimeout(commentSaveTimer);
+  commentSaveTimer = null;
   await apiPost('/api/review', {collection: asset.collection, asset_id: asset.asset_id, status, comment});
   updateLocal(asset.asset_id || asset.rel, {status, comment, is_new: false});
   applyFilter();
@@ -333,13 +397,34 @@ async function review(status) {
   if (index >= 0) openAt(index); else close();
 }
 
-async function saveComment() {
-  const asset = state.filtered[state.current];
-  const comment = $('#comment').value;
-  await apiPost('/api/comment', {collection: asset.collection, asset_id: asset.asset_id, comment});
-  updateLocal(asset.asset_id || asset.rel, {comment, is_new: false});
+let commentSaveTimer = null;
+
+async function saveCommentSnapshot(assetKey, collection, assetId, comment) {
+  const current = state.filtered[state.current];
+  if (current && keyFor(current) === assetKey) $('#commentState').textContent = 'Saving…';
+  await apiPost('/api/comment', {collection, asset_id: assetId, comment});
+  updateLocal(assetKey, {comment, is_new: false});
   applyFilter();
+  const index = state.filtered.findIndex(item => keyFor(item) === assetKey);
+  if (index >= 0 && !modal.classList.contains('hidden')) state.current = index;
   await refreshReviewState();
+  const active = state.filtered[state.current];
+  if (active && keyFor(active) === assetKey && $('#comment').value === comment) $('#commentState').textContent = 'Saved';
+}
+
+function scheduleCommentSave() {
+  clearTimeout(commentSaveTimer);
+  const asset = state.filtered[state.current];
+  if (!asset) return;
+  const assetKey = keyFor(asset);
+  const collection = asset.collection;
+  const assetId = asset.asset_id;
+  const comment = $('#comment').value;
+  $('#commentState').textContent = 'Unsaved';
+  commentSaveTimer = setTimeout(() => {
+    commentSaveTimer = null;
+    saveCommentSnapshot(assetKey, collection, assetId, comment).catch(showError);
+  }, 650);
 }
 
 async function bulkReview(status) {
@@ -393,20 +478,14 @@ async function copyPath() {
   const asset = state.filtered[state.current];
   if (!asset) return;
   await navigator.clipboard.writeText(asset.rel);
-  const button = $('#copyPath');
-  const original = button.textContent;
-  button.textContent = 'Copied';
-  setTimeout(() => { button.textContent = original; }, 900);
+  $('#summary').textContent = 'Relative path copied';
 }
 
 async function copyReviewLink() {
   const asset = state.filtered[state.current];
   if (!asset) return;
   await navigator.clipboard.writeText(location.origin + assetUrl(asset));
-  const button = $('#copyReviewLink');
-  const original = button.textContent;
-  button.textContent = 'Copied';
-  setTimeout(() => { button.textContent = original; }, 900);
+  $('#summary').textContent = 'Review link copied';
 }
 
 async function loadAnnotations(asset) {
@@ -481,17 +560,15 @@ function normalizedPoint(event) {
 }
 
 function setAnnotationMode(mode) {
-  state.annotationMode = mode;
+  state.annotationMode = mode || null;
   state.annotationStart = null;
-  $('#annotationLayer').classList.toggle('drawing', Boolean(mode));
-  $('#pointAnnotation').classList.toggle('active', mode === 'point');
-  $('#regionAnnotation').classList.toggle('active', mode === 'region');
-  $('#cancelAnnotation').classList.toggle('hidden', !mode);
-  $('#annotationHelp').textContent = mode === 'point'
+  $('#annotationLayer').classList.toggle('drawing', Boolean(state.annotationMode));
+  $('#annotationMode').value = state.annotationMode || '';
+  $('#annotationHelp').textContent = state.annotationMode === 'point'
     ? 'Click the exact point you want changed.'
-    : mode === 'region'
+    : state.annotationMode === 'region'
       ? 'Drag a rectangle around the area you want changed.'
-      : 'Pin feedback directly to the image.';
+      : 'Choose Point or Region when you need precise feedback.';
 }
 
 function cancelAnnotationMode() {
@@ -502,14 +579,8 @@ function cancelAnnotationMode() {
     layer.classList.remove('drawing');
     layer.querySelectorAll('.annotation-draft').forEach(element => element.remove());
   }
-  const point = $('#pointAnnotation');
-  const region = $('#regionAnnotation');
-  const cancel = $('#cancelAnnotation');
-  const help = $('#annotationHelp');
-  if (point) point.classList.remove('active');
-  if (region) region.classList.remove('active');
-  if (cancel) cancel.classList.add('hidden');
-  if (help) help.textContent = 'Pin feedback directly to the image.';
+  if ($('#annotationMode')) $('#annotationMode').value = '';
+  if ($('#annotationHelp')) $('#annotationHelp').textContent = 'Choose Point or Region when you need precise feedback.';
 }
 
 async function createSpatialAnnotation(kind, geometry) {
@@ -751,15 +822,13 @@ function renderCompare() {
   const assets = state.compareAssets;
   const gridElement = $('#compareGrid');
   const overlayControl = $('#overlayControl');
-  document.querySelectorAll('[data-compare-mode]').forEach(button => {
-    const needsTwo = button.dataset.compareMode !== 'side';
-    button.disabled = needsTwo && assets.length !== 2;
-    button.classList.toggle('active', button.dataset.compareMode === state.compareMode);
-  });
   if (state.compareMode !== 'side' && assets.length !== 2) state.compareMode = 'side';
+  $('#compareMode').value = state.compareMode;
+  [...$('#compareMode').options].forEach(option => {
+    option.disabled = option.value !== 'side' && assets.length !== 2;
+  });
   overlayControl.classList.toggle('hidden', state.compareMode !== 'overlay');
-  $('#compareLink').classList.toggle('active', state.compareLinked);
-  $('#compareLink').textContent = state.compareLinked ? 'Linked zoom' : 'Independent zoom';
+  $('#compareLink').value = state.compareLinked ? 'linked' : 'independent';
 
   if (state.compareMode === 'side') {
     $('#compareHint').textContent = 'Scroll to zoom, drag to pan, double-click to reset. Linked view keeps variants aligned.';
@@ -812,54 +881,125 @@ function closeCompare() {
   if (modal.classList.contains('hidden')) document.body.style.overflow = '';
 }
 
+async function loadActivity() {
+  if (!state.active) return;
+  const response = await fetch(`/api/activity?collection=${encodeURIComponent(state.active)}&limit=200`, {cache: 'no-store'});
+  if (!response.ok) throw new Error('Activity request failed');
+  const data = await response.json();
+  state.activityEvents = data.events || [];
+  $('#activitySummary').textContent = `${state.activityEvents.length} recent events`;
+  $('#activityList').innerHTML = state.activityEvents.length
+    ? [...state.activityEvents].reverse().map(event =>
+        `<div class="activity-event"><strong>${esc(event.summary || event.action)}</strong><span>${esc(event.created_at || '')}</span></div>`
+      ).join('')
+    : '<div class="activity-event"><span>No activity yet.</span></div>';
+}
+
+async function setView(view) {
+  state.view = view === 'activity' ? 'activity' : 'gallery';
+  $('#view').value = state.view;
+  $('#galleryView').classList.toggle('hidden', state.view !== 'gallery');
+  $('#activityView').classList.toggle('hidden', state.view !== 'activity');
+  if (state.view === 'activity') await loadActivity();
+}
+
+function downloadJson(filename, payload) {
+  const blob = new Blob([JSON.stringify(payload, null, 2) + '\n'], {type: 'application/json'});
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function exportHandoff() {
+  if (!state.active) return;
+  const response = await fetch(`/api/handoff?collection=${encodeURIComponent(state.active)}`, {cache: 'no-store'});
+  if (!response.ok) throw new Error('Approved handoff request failed');
+  const payload = await response.json();
+  downloadJson(`${state.active}-approved-handoff.json`, payload);
+}
+
+async function handleCollectionAction(value) {
+  if (!value) return;
+  if (value === 'select-all') selectAllVisible();
+  else if (value === 'report') window.open(`/report?collection=${encodeURIComponent(state.active)}&present=1&refresh=1`, '_blank', 'noopener');
+  else if (value === 'handoff') await exportHandoff();
+  else if (value === 'refresh') await load(state.active, true);
+  else if (value === 'complete' || value === 'reopen') await toggleComplete();
+  updateCollectionActions();
+}
+
+async function handleSelectionAction(value) {
+  if (!value) return;
+  if (value === 'approve') await bulkReview('approved');
+  else if (value === 'maybe') await bulkReview('maybe');
+  else if (value === 'reject') await bulkReview('rejected');
+  else if (value === 'clear-review') await bulkReview('');
+  else if (value === 'compare') openCompare();
+  else if (value === 'group') await groupVariants();
+  else if (value === 'clear-selection') clearSelection();
+  updateBulk();
+}
+
+async function handleAssetAction(value) {
+  if (!value) return;
+  const asset = state.filtered[state.current];
+  if (!asset) return;
+  if (value === 'history') await showHistory();
+  else if (value === 'undo') await undoReview();
+  else if (value === 'copy-path') await copyPath();
+  else if (value === 'copy-link') await copyReviewLink();
+  else if (value === 'open-original') window.open(asset.file, '_blank', 'noopener');
+  updateAssetActions(asset);
+}
+
+async function handleFamilyAction(value) {
+  if (!value) return;
+  if (value === 'compare') openFamilyCompare();
+  else if (value === 'prefer') await setPreferredFamilyMember();
+  else if (value === 'leave') await leaveFamily();
+}
+
 $('#collection').onchange = () => {
   const slug = $('#collection').value;
   history.pushState(null, '', collectionUrl(slug));
-  load(slug).catch(showError);
+  load(slug).then(() => setView(state.view)).catch(showError);
 };
-$('#filter').onchange = applyFilter;
+$('#filter').onchange = () => { applyFilter(); updateCollectionActions(); };
 $('#sort').onchange = applyFilter;
-$('#search').oninput = applyFilter;
-$('#report').onclick = () => { if (state.active) window.open(`/report?collection=${encodeURIComponent(state.active)}&present=1&refresh=1`, '_blank', 'noopener'); };
-$('#refresh').onclick = () => load(state.active, true).catch(showError);
-$('#selectAll').onclick = selectAllVisible;
-$('#reviewComplete').onclick = () => toggleComplete().catch(showError);
+$('#search').oninput = () => { applyFilter(); updateCollectionActions(); };
+$('#view').onchange = () => setView($('#view').value).catch(showError);
+$('#actions').onchange = () => handleCollectionAction($('#actions').value).catch(showError);
+$('#selectionAction').onchange = () => handleSelectionAction($('#selectionAction').value).catch(showError);
+$('#reviewStatus').onchange = () => review($('#reviewStatus').value).catch(showError);
+$('#assetActions').onchange = () => handleAssetAction($('#assetActions').value).catch(showError);
+$('#familyActions').onchange = () => handleFamilyAction($('#familyActions').value).catch(showError);
+$('#annotationMode').onchange = () => setAnnotationMode($('#annotationMode').value);
+$('#comment').oninput = scheduleCommentSave;
 $('#close').onclick = close;
 $('#prev').onclick = () => step(-1);
 $('#next').onclick = () => step(1);
-$('#saveComment').onclick = () => saveComment().catch(showError);
-$('#undoReview').onclick = () => undoReview().catch(showError);
-$('#showHistory').onclick = () => showHistory().catch(showError);
-$('#copyPath').onclick = () => copyPath().catch(showError);
-$('#copyReviewLink').onclick = () => copyReviewLink().catch(showError);
-$('#compareFamily').onclick = openFamilyCompare;
-$('#setPreferred').onclick = () => setPreferredFamilyMember().catch(showError);
-$('#leaveFamily').onclick = () => leaveFamily().catch(showError);
-$('#pointAnnotation').onclick = () => setAnnotationMode(state.annotationMode === 'point' ? null : 'point');
-$('#regionAnnotation').onclick = () => setAnnotationMode(state.annotationMode === 'region' ? null : 'region');
-$('#cancelAnnotation').onclick = cancelAnnotationMode;
 $('#annotationLayer').onpointerdown = annotationPointerDown;
 $('#annotationLayer').onpointermove = annotationPointerMove;
 $('#annotationLayer').onpointerup = annotationPointerUp;
-$('#groupVariants').onclick = () => groupVariants().catch(showError);
-$('#compare').onclick = openCompare;
-$('#compareLink').onclick = toggleCompareLinked;
-$('#compareReset').onclick = () => resetCompareView();
+$('#compareMode').onchange = () => setCompareMode($('#compareMode').value);
+$('#compareLink').onchange = () => {
+  const linked = $('#compareLink').value === 'linked';
+  if (state.compareLinked !== linked) toggleCompareLinked();
+};
+$('#compareActions').onchange = () => {
+  if ($('#compareActions').value === 'reset') resetCompareView();
+  $('#compareActions').value = '';
+};
 $('#closeCompare').onclick = closeCompare;
-$('#clearSelection').onclick = clearSelection;
 $('#overlayRange').oninput = () => {
   const top = $('#compareGrid .compare-top');
   if (top && state.compareMode === 'overlay') top.style.opacity = Number($('#overlayRange').value) / 100;
 };
-document.querySelectorAll('.review button[data-status]').forEach(button => {
-  button.onclick = () => review(button.dataset.status).catch(showError);
-});
-document.querySelectorAll('[data-bulk-status]').forEach(button => {
-  button.onclick = () => bulkReview(button.dataset.bulkStatus).catch(showError);
-});
-document.querySelectorAll('[data-compare-mode]').forEach(button => {
-  button.onclick = () => setCompareMode(button.dataset.compareMode);
-});
 
 window.onpopstate = () => load(collectionFromLocation()).catch(showError);
 document.onkeydown = event => {
@@ -868,7 +1008,7 @@ document.onkeydown = event => {
     return;
   }
   if (modal.classList.contains('hidden')) return;
-  if (event.target && (event.target.tagName === 'TEXTAREA' || event.target.tagName === 'INPUT')) return;
+  if (event.target && ['TEXTAREA', 'INPUT', 'SELECT'].includes(event.target.tagName)) return;
   if (event.key === 'Escape' && state.annotationMode) cancelAnnotationMode();
   else if (event.key === 'Escape') close();
   else if (event.key === 'ArrowLeft') step(-1);

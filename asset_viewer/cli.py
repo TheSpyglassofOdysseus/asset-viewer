@@ -15,8 +15,12 @@ from .app import LOOPBACK_HOSTS, capability_document, scan_collection, serve as 
 from .wsgi import serve as production_serve
 from .report import render_review_report
 from .mcp_server import run_mcp
+from .activity import activity_feed
+from .handoff import approved_handoff, copy_approved_set
 from .storage import (
     add_collection,
+    asset_metadata,
+    set_asset_metadata,
     annotations_for_asset,
     create_annotation,
     update_annotation,
@@ -161,6 +165,7 @@ def build_parser() -> argparse.ArgumentParser:
     add = sub.add_parser("add", help="Register an image folder")
     add.add_argument("path")
     add.add_argument("label", nargs="?")
+    add.add_argument("--group", help="Optional navigation group; does not move the source folder")
 
     remove = sub.add_parser("remove", help="Remove a registered folder")
     remove.add_argument("key", help="Collection slug or absolute path")
@@ -196,6 +201,25 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--no-scan", action="store_true")
     report.add_argument("--present-only", action="store_true", help="Exclude tombstoned/missing assets")
     report.add_argument("--no-images", action="store_true", help="Do not embed thumbnails in HTML reports")
+
+    metadata = sub.add_parser("metadata", help="Read or update optional provenance/generation metadata")
+    metadata.add_argument("collection")
+    metadata.add_argument("asset", help="Stable asset ID or relative path")
+    metadata.add_argument("--set", action="append", default=[], metavar="KEY=VALUE", help="Set a provenance field; repeatable")
+    metadata.add_argument("--extra-json", help="Merge arbitrary extra metadata from a JSON object")
+    metadata.add_argument("--json", action="store_true")
+
+    activity = sub.add_parser("activity", help="Read human-readable collection activity")
+    activity.add_argument("--collection")
+    activity.add_argument("--after", type=int, default=0, dest="after_id")
+    activity.add_argument("--limit", type=int, default=200)
+    activity.add_argument("--json", action="store_true")
+
+    handoff = sub.add_parser("handoff", help="Export the exact approved asset set")
+    handoff.add_argument("collection")
+    handoff.add_argument("--output", default="-", help="Manifest output file or - for stdout")
+    handoff.add_argument("--copy-to", help="Optionally copy approved files to this separate destination")
+    handoff.add_argument("--overwrite", action="store_true", help="Allow replacement inside --copy-to destination")
 
     pending = sub.add_parser("pending", help="Report collections still waiting for human review")
     pending.add_argument("--collection")
@@ -355,8 +379,9 @@ def main() -> None:
     args = parser.parse_args()
     try:
         if args.command == "add":
-            row = add_collection(args.path, args.label)
-            print(f"Added {row['label']} ({row['slug']}): {row['path']}")
+            row = add_collection(args.path, args.label, args.group)
+            suffix = f" [{row['group']}]" if row.get("group") else ""
+            print(f"Added {row['label']} ({row['slug']}){suffix}: {row['path']}")
         elif args.command == "remove":
             row = remove_collection(args.key)
             print(f"Removed {row['label']} ({row['slug']})")
@@ -365,7 +390,7 @@ def main() -> None:
             if not rows:
                 print("No folders registered.")
             for row in rows:
-                print(f"{row['slug']}\t{row['label']}\t{row['path']}")
+                print(f"{row['slug']}\t{row.get('group', '')}\t{row['label']}\t{row['path']}")
         elif args.command == "capabilities":
             payload = capability_document()
             if args.json:
@@ -404,6 +429,41 @@ def main() -> None:
                 sys.stdout.write(payload)
             else:
                 Path(args.output).expanduser().write_text(payload)
+                print(f"Wrote {args.output}")
+        elif args.command == "metadata":
+            patch = {}
+            for assignment in args.set:
+                if "=" not in assignment:
+                    raise ValueError("--set values must use KEY=VALUE")
+                key, value = assignment.split("=", 1)
+                patch[key.strip()] = value
+            if args.extra_json:
+                extra = json.loads(args.extra_json)
+                if not isinstance(extra, dict):
+                    raise ValueError("--extra-json must decode to an object")
+                patch["extra"] = extra
+            payload = set_asset_metadata(args.collection, args.asset, patch) if patch else asset_metadata(args.collection, args.asset)
+            if args.json:
+                print(json.dumps(payload, indent=2, sort_keys=True))
+            else:
+                visible = {key: value for key, value in payload.items() if key not in {"asset_id", "collection", "created_at", "updated_at"} and value not in {"", None, {}}}
+                print(f"{payload['asset_id']} ({payload['collection']})")
+                for key, value in visible.items():
+                    print(f"{key}: {json.dumps(value, ensure_ascii=False) if isinstance(value, dict) else value}")
+        elif args.command == "activity":
+            payload = activity_feed(args.collection, args.after_id, args.limit)
+            if args.json:
+                print(json.dumps(payload, indent=2, sort_keys=True))
+            else:
+                for event in payload["events"]:
+                    print(f"{event['id']}\t{event['created_at']}\t{event['summary']}")
+        elif args.command == "handoff":
+            payload = copy_approved_set(args.collection, args.copy_to, overwrite=args.overwrite) if args.copy_to else approved_handoff(args.collection)
+            rendered = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+            if args.output == "-":
+                sys.stdout.write(rendered)
+            else:
+                Path(args.output).expanduser().write_text(rendered)
                 print(f"Wrote {args.output}")
         elif args.command == "pending":
             if not args.no_scan:
