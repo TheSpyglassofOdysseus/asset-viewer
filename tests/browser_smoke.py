@@ -9,6 +9,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import Callable
 
 from playwright.sync_api import sync_playwright
 
@@ -17,6 +18,20 @@ def free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         return int(sock.getsockname()[1])
+
+
+def wait_until(description: str, condition: Callable[[], bool], timeout: float = 10.0) -> None:
+    deadline = time.monotonic() + timeout
+    last_error: Exception | None = None
+    while time.monotonic() < deadline:
+        try:
+            if condition():
+                return
+        except Exception as exc:  # transient browser/navigation state
+            last_error = exc
+        time.sleep(0.1)
+    detail = f"; last error: {last_error}" if last_error else ""
+    raise AssertionError(f"Timed out waiting for {description}{detail}")
 
 
 def wait_for_server(base_url: str, process: subprocess.Popen[str], timeout: float = 30.0) -> None:
@@ -82,7 +97,10 @@ def main() -> None:
                 response = page.goto(base_url, wait_until="networkidle")
                 assert response is not None and response.ok, "initial gallery request failed"
                 page.locator("#summary").wait_for(state="visible")
-                page.wait_for_function("document.querySelector('#summary').textContent.includes('6 images')")
+                wait_until(
+                    "six demo images to render",
+                    lambda: "6 images" in (page.locator("#summary").text_content() or ""),
+                )
 
                 assert page.title() == "Asset Viewer"
                 assert page.locator("#collection").input_value() == "asset-viewer-demo"
@@ -93,15 +111,19 @@ def main() -> None:
                 assert page.locator("#filename").inner_text().strip()
 
                 page.locator("#reviewStatus").select_option("approved")
-                page.wait_for_function(
-                    "document.querySelector('#reviewDecision').textContent.toLowerCase().includes('approved')"
+                wait_until(
+                    "approved review state",
+                    lambda: "approved" in (page.locator("#reviewDecision").text_content() or "").lower(),
                 )
                 page.locator("#close").click()
                 page.locator("#modal").wait_for(state="hidden")
 
                 page.locator("#view").select_option("activity")
                 page.locator("#activityView").wait_for(state="visible")
-                page.wait_for_function("document.querySelectorAll('#activityList .activity-event').length > 0")
+                wait_until(
+                    "review event to appear in Activity",
+                    lambda: page.locator("#activityList .activity-event").count() > 0,
+                )
 
                 assert not page_errors, f"browser page errors: {page_errors}"
                 browser.close()
