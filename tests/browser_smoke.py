@@ -66,10 +66,13 @@ def main() -> None:
         env["ASSET_VIEWER_HOME"] = str(root / "data")
         env["ASSET_VIEWER_CACHE"] = str(root / "cache")
 
+        # Run the product outside the repository checkout. In release CI this
+        # prevents the source tree from shadowing the cleanly installed wheel.
         subprocess.run(
             [sys.executable, "-m", "asset_viewer", "demo", "--path", str(root / "demo-assets")],
             check=True,
             env=env,
+            cwd=root,
             capture_output=True,
             text=True,
         )
@@ -91,6 +94,7 @@ def main() -> None:
                 "WARNING",
             ],
             env=env,
+            cwd=root,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
