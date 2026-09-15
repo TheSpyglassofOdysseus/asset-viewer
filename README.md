@@ -54,6 +54,9 @@ No import job. No duplicate asset library. No requirement to upload the batch to
 - **Human-readable Activity view** backed by the same durable event stream agents consume.
 - **Approved-set handoff manifests** with exact stable IDs, hashes, decisions, annotations, family/preferred state, and provenance; optional copying is explicit and never mutates originals.
 - **Grouped collection navigation** that organizes the viewer without moving project folders.
+- **Project-native `.asset-viewer.toml` registration** so repositories can declare review folders without bespoke setup scripts.
+- **Metadata adapters** for sidecar JSON and isolated PNG generation metadata import.
+- **Durable outbound webhooks** with signed delivery, replay control, and per-endpoint cursors for push automation.
 - **Context-aware selectors and menus** so capabilities grow without turning the toolbar into a button farm.
 - **Keyboard review**: arrow keys to navigate; `A`, `M`, `R` to classify.
 - **Multiple collections** behind one viewer URL.
@@ -109,6 +112,39 @@ asset-viewer report --collection project-images --output review.html
 asset-viewer report --collection project-images --format markdown --output review.md
 ```
 
+### Project-native registration and metadata
+
+A repository can declare its review surfaces in a project-owned `.asset-viewer.toml`:
+
+```toml
+version = 1
+project = "Example Project"
+group = "Design"
+
+[[collections]]
+path = "artifacts/renders"
+label = "Generated Renders"
+adapters = ["sidecar", "png_text"]
+```
+
+Then validate or register it without duplicating source files:
+
+```bash
+asset-viewer project-sync --dry-run
+asset-viewer project-sync
+```
+
+Sidecar metadata uses `<image>.asset-viewer.json`; supported PNG text metadata is parsed in the same isolated worker boundary used for image inspection.
+
+### Push review events with webhooks
+
+The durable event feed can be delivered to an operator-configured HTTP(S) endpoint. First use starts at the current event cursor unless `--replay` is requested. Add `--secret` to sign the request body with `X-Asset-Viewer-Signature`.
+
+```bash
+asset-viewer webhook --url https://example.invalid/review-events --once
+asset-viewer webhook-status
+```
+
 ### Optional MCP adapter
 
 Install the optional MCP dependency and run the adapter over stdio:
@@ -132,6 +168,8 @@ asset-viewer reviews [--collection]  Read review state (add --json for agents)
 asset-viewer export-manifest       Export review state as JSON
 asset-viewer pending                Exit 2 while human review is still pending
 asset-viewer events                 Read ordered review events for automation
+asset-viewer webhook ...              Push ordered review events with a durable cursor
+asset-viewer webhook-status           Inspect sanitized webhook delivery state
 asset-viewer wait-for-review        Wait on the explicit human-completion gate
 asset-viewer complete SLUG          Mark a fully-reviewed collection complete
 asset-viewer reopen SLUG            Reopen collection review
@@ -147,6 +185,9 @@ asset-viewer annotations SLUG ASSET List point/region feedback for one asset
 asset-viewer annotate ...            Create precise point/region feedback
 asset-viewer cache [status|prune]    Inspect/prune generated preview cache
 asset-viewer report ...              Export a printable HTML/Markdown review report
+asset-viewer project-config ...       Inspect the nearest project-owned config
+asset-viewer project-sync ...         Register declared review folders/import metadata
+asset-viewer metadata-import ...      Import sidecar/PNG generation metadata
 asset-viewer metadata SLUG ASSET ... Read/update optional provenance metadata
 asset-viewer activity ...            Read recent human-readable collection activity
 asset-viewer handoff SLUG ...        Export the exact approved asset set
@@ -285,7 +326,7 @@ asset-viewer serve --port 8160
 
 The roadmap is organized around a deliberate progression: **production hardening → human/agent feedback → agent-native automation → serious creative review → collaboration**.
 
-The core human→agent loop now includes precise annotations, linked comparison, variant families, live watching, printable reports, optional provenance metadata, a human Activity view, exact approved-set handoff, grouped collection navigation, and an optional MCP adapter. The next product frontier is project-native registration/adapters, saved views/command palette, webhook integration, stronger identity for collaborative deployments, and signed release provenance while preserving the local-first review-plane boundary.
+The core human→agent loop now includes precise annotations, linked comparison, variant families, live watching, printable reports, provenance metadata, a human Activity view, exact approved-set handoff, grouped collection navigation, project-native registration/metadata adapters, saved-view and command-palette affordances, durable webhooks, and an optional MCP adapter. The next product frontier is stronger identity for collaborative deployments and signed release provenance while preserving the local-first review-plane boundary.
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the phased feature/benefit analysis and roadmap.
 

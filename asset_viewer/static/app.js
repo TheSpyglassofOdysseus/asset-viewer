@@ -19,15 +19,89 @@ let state = {
   catalogGeneration: 0,
   view: 'gallery',
   activityEvents: [],
+  savedViews: [],
+  activeSavedView: '',
+  paletteMatches: [],
+  paletteIndex: 0,
 };
 
 const $ = selector => document.querySelector(selector);
 const grid = $('#grid');
 const modal = $('#modal');
 const compareModal = $('#compareModal');
+const commandPalette = $('#commandPalette');
+const SAVED_VIEWS_KEY = 'asset-viewer.saved-views.v1';
 const esc = value => String(value).replace(/[&<>\"]/g, char => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[char]));
 const keyFor = asset => asset.asset_id || asset.rel;
 const assetSrc = asset => asset.preview || asset.thumb;
+
+function loadSavedViews() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SAVED_VIEWS_KEY) || '[]');
+    state.savedViews = Array.isArray(parsed) ? parsed.filter(item => item && typeof item.name === 'string' && typeof item.id === 'string') : [];
+  } catch {
+    state.savedViews = [];
+  }
+}
+
+function persistSavedViews() {
+  localStorage.setItem(SAVED_VIEWS_KEY, JSON.stringify(state.savedViews));
+}
+
+function renderViewMenu() {
+  const select = $('#view');
+  const saved = state.savedViews.map(item => `<option value="saved:${esc(item.id)}">${esc(item.name)}</option>`).join('');
+  select.innerHTML = '<option value="gallery">Gallery</option><option value="activity">Activity</option>' +
+    (saved ? `<optgroup label="Saved views">${saved}</optgroup>` : '');
+  select.value = state.activeSavedView ? `saved:${state.activeSavedView}` : state.view;
+}
+
+function clearActiveSavedView() {
+  if (!state.activeSavedView) return;
+  state.activeSavedView = '';
+  renderViewMenu();
+}
+
+function saveCurrentView() {
+  const name = window.prompt('Name this view');
+  if (!name || !name.trim()) return;
+  const trimmed = name.trim().slice(0, 80);
+  const existing = state.savedViews.find(item => item.name.toLowerCase() === trimmed.toLowerCase());
+  const record = {
+    id: existing?.id || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    name: trimmed,
+    search: $('#search').value,
+    filter: $('#filter').value,
+    sort: $('#sort').value,
+  };
+  state.savedViews = existing ? state.savedViews.map(item => item.id === existing.id ? record : item) : [...state.savedViews, record];
+  state.activeSavedView = record.id;
+  persistSavedViews();
+  renderViewMenu();
+}
+
+function applySavedView(id) {
+  const record = state.savedViews.find(item => item.id === id);
+  if (!record) return;
+  state.activeSavedView = record.id;
+  $('#search').value = record.search || '';
+  $('#filter').value = record.filter || 'all';
+  $('#sort').value = record.sort || 'newest';
+  state.view = 'gallery';
+  $('#galleryView').classList.remove('hidden');
+  $('#activityView').classList.add('hidden');
+  applyFilter();
+  renderViewMenu();
+  updateCollectionActions();
+}
+
+function deleteActiveSavedView() {
+  if (!state.activeSavedView) return;
+  state.savedViews = state.savedViews.filter(item => item.id !== state.activeSavedView);
+  state.activeSavedView = '';
+  persistSavedViews();
+  renderViewMenu();
+}
 
 function collectionFromLocation() {
   const match = location.pathname.match(/^\/c\/([^/]+)$/);
@@ -229,6 +303,8 @@ function updateCollectionActions() {
   const review = state.reviewState;
   const items = [
     {value: 'select-all', label: `Select all visible (${state.filtered.length})`, disabled: !state.filtered.length},
+    {value: 'save-view', label: 'Save current view…'},
+    ...(state.activeSavedView ? [{value: 'delete-view', label: 'Delete active saved view'}] : []),
     {value: 'report', label: 'Open review report'},
     {value: 'handoff', label: 'Export approved handoff'},
     {value: 'refresh', label: 'Refresh collection'},
@@ -895,8 +971,13 @@ async function loadActivity() {
 }
 
 async function setView(view) {
+  if (view.startsWith('saved:')) {
+    applySavedView(view.slice(6));
+    return;
+  }
+  state.activeSavedView = '';
   state.view = view === 'activity' ? 'activity' : 'gallery';
-  $('#view').value = state.view;
+  renderViewMenu();
   $('#galleryView').classList.toggle('hidden', state.view !== 'gallery');
   $('#activityView').classList.toggle('hidden', state.view !== 'activity');
   if (state.view === 'activity') await loadActivity();
@@ -925,6 +1006,8 @@ async function exportHandoff() {
 async function handleCollectionAction(value) {
   if (!value) return;
   if (value === 'select-all') selectAllVisible();
+  else if (value === 'save-view') saveCurrentView();
+  else if (value === 'delete-view') deleteActiveSavedView();
   else if (value === 'report') window.open(`/report?collection=${encodeURIComponent(state.active)}&present=1&refresh=1`, '_blank', 'noopener');
   else if (value === 'handoff') await exportHandoff();
   else if (value === 'refresh') await load(state.active, true);
@@ -963,14 +1046,77 @@ async function handleFamilyAction(value) {
   else if (value === 'leave') await leaveFamily();
 }
 
+function paletteCommands() {
+  const commands = [
+    {label: 'View: Gallery', run: () => setView('gallery')},
+    {label: 'View: Activity', run: () => setView('activity')},
+    {label: 'Focus search', run: () => $('#search').focus()},
+    {label: 'Save current view…', run: () => saveCurrentView()},
+    {label: 'Refresh collection', run: () => load(state.active, true)},
+    {label: 'Open review report', run: () => window.open(`/report?collection=${encodeURIComponent(state.active)}&present=1&refresh=1`, '_blank', 'noopener')},
+    {label: 'Export approved handoff', run: () => exportHandoff()},
+  ];
+  for (const saved of state.savedViews) commands.push({label: `Saved view: ${saved.name}`, run: () => applySavedView(saved.id)});
+  if (state.filtered.length) commands.push({label: `Select all visible (${state.filtered.length})`, run: () => selectAllVisible()});
+  if (state.selected.size >= 2) commands.push({label: 'Compare selected assets', run: () => openCompare()});
+  if (state.reviewState && !state.reviewState.scan_incomplete && !state.reviewState.empty) {
+    if (state.reviewState.complete) commands.push({label: 'Reopen review', run: () => toggleComplete()});
+    else if (!state.reviewState.unreviewed) commands.push({label: 'Mark review complete', run: () => toggleComplete()});
+  }
+  if (!modal.classList.contains('hidden')) {
+    commands.push(
+      {label: 'Asset: Set Approved', run: () => review('approved')},
+      {label: 'Asset: Set Maybe', run: () => review('maybe')},
+      {label: 'Asset: Set Rejected', run: () => review('rejected')},
+      {label: 'Asset: Clear review state', run: () => review('')},
+      {label: 'Asset: Review history', run: () => showHistory()},
+      {label: 'Asset: Copy review link', run: () => copyReviewLink()},
+    );
+  }
+  return commands;
+}
+
+function closeCommandPalette() {
+  commandPalette.classList.add('hidden');
+  $('#commandSearch').value = '';
+  state.paletteMatches = [];
+  state.paletteIndex = 0;
+}
+
+function renderCommandPalette() {
+  const query = $('#commandSearch').value.trim().toLowerCase();
+  state.paletteMatches = paletteCommands().filter(command => !query || command.label.toLowerCase().includes(query));
+  state.paletteIndex = Math.max(0, Math.min(state.paletteIndex, Math.max(0, state.paletteMatches.length - 1)));
+  $('#commandList').innerHTML = state.paletteMatches.length
+    ? state.paletteMatches.map((command, index) => `<button type="button" role="option" class="command-row${index === state.paletteIndex ? ' active' : ''}" data-command="${index}">${esc(command.label)}</button>`).join('')
+    : '<span class="command-empty">No matching commands.</span>';
+  $('#commandList').querySelectorAll('[data-command]').forEach(button => {
+    button.onclick = () => runPaletteCommand(Number(button.dataset.command));
+  });
+}
+
+function openCommandPalette() {
+  state.paletteIndex = 0;
+  commandPalette.classList.remove('hidden');
+  renderCommandPalette();
+  $('#commandSearch').focus();
+}
+
+function runPaletteCommand(index) {
+  const command = state.paletteMatches[index];
+  if (!command) return;
+  closeCommandPalette();
+  Promise.resolve(command.run()).catch(showError);
+}
+
 $('#collection').onchange = () => {
   const slug = $('#collection').value;
   history.pushState(null, '', collectionUrl(slug));
   load(slug).then(() => setView(state.view)).catch(showError);
 };
-$('#filter').onchange = () => { applyFilter(); updateCollectionActions(); };
-$('#sort').onchange = applyFilter;
-$('#search').oninput = () => { applyFilter(); updateCollectionActions(); };
+$('#filter').onchange = () => { clearActiveSavedView(); applyFilter(); updateCollectionActions(); };
+$('#sort').onchange = () => { clearActiveSavedView(); applyFilter(); };
+$('#search').oninput = () => { clearActiveSavedView(); applyFilter(); updateCollectionActions(); };
 $('#view').onchange = () => setView($('#view').value).catch(showError);
 $('#actions').onchange = () => handleCollectionAction($('#actions').value).catch(showError);
 $('#selectionAction').onchange = () => handleSelectionAction($('#selectionAction').value).catch(showError);
@@ -995,6 +1141,25 @@ $('#compareActions').onchange = () => {
   $('#compareActions').value = '';
 };
 $('#closeCompare').onclick = closeCompare;
+$('#commandSearch').oninput = () => { state.paletteIndex = 0; renderCommandPalette(); };
+$('#commandSearch').onkeydown = event => {
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    state.paletteIndex = Math.min(state.paletteMatches.length - 1, state.paletteIndex + 1);
+    renderCommandPalette();
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    state.paletteIndex = Math.max(0, state.paletteIndex - 1);
+    renderCommandPalette();
+  } else if (event.key === 'Enter') {
+    event.preventDefault();
+    runPaletteCommand(state.paletteIndex);
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    closeCommandPalette();
+  }
+};
+commandPalette.onclick = event => { if (event.target === commandPalette) closeCommandPalette(); };
 $('#overlayRange').oninput = () => {
   const top = $('#compareGrid .compare-top');
   if (top && state.compareMode === 'overlay') top.style.opacity = Number($('#overlayRange').value) / 100;
@@ -1002,6 +1167,15 @@ $('#overlayRange').oninput = () => {
 
 window.onpopstate = () => load(collectionFromLocation()).catch(showError);
 document.onkeydown = event => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+    event.preventDefault();
+    commandPalette.classList.contains('hidden') ? openCommandPalette() : closeCommandPalette();
+    return;
+  }
+  if (!commandPalette.classList.contains('hidden')) {
+    if (event.key === 'Escape') closeCommandPalette();
+    return;
+  }
   if (!compareModal.classList.contains('hidden')) {
     if (event.key === 'Escape') closeCompare();
     return;
@@ -1035,6 +1209,8 @@ function showError(error) {
 
 (async () => {
   try {
+    loadSavedViews();
+    renderViewMenu();
     await session();
     await load(collectionFromLocation());
     setInterval(() => pollCatalog().catch(error => console.error(error)), 2000);

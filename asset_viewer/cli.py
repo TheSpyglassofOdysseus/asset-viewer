@@ -16,6 +16,10 @@ from .mcp_server import run_mcp
 from .activity import activity_feed
 from .handoff import approved_handoff, copy_approved_set
 from .demo_assets import DEMO_COLLECTION_LABEL, DEMO_FAMILY, DEMO_PROJECT, DEMO_REVIEWS, create_demo
+from .metadata_adapters import import_collection_metadata
+from .project_config import find_project_config, load_project_config
+from .project_sync import sync_project
+from .webhook import run_webhook, validate_webhook_url, webhook_status
 from .storage import (
     add_collection,
     asset_metadata,
@@ -128,6 +132,39 @@ def doctor(host: str, trusted_hosts: list[str]) -> int:
     findings.append(("INFO", f"preview limits: bytes={os.environ.get('ASSET_VIEWER_MAX_THUMBNAIL_BYTES', str(250 * 1024 * 1024))} pixels={os.environ.get('ASSET_VIEWER_MAX_IMAGE_PIXELS', '50000000')} workers={os.environ.get('ASSET_VIEWER_THUMBNAIL_WORKERS', '2')}"))
     cache = preview_cache_status()
     findings.append(("INFO", f"preview cache: files={cache['files']} bytes={cache['bytes']} path={cache['path']}"))
+    try:
+        from importlib.metadata import version
+        findings.append(("PASS", f"filesystem watcher: watchdog {version('watchdog')}"))
+    except Exception as exc:
+        findings.append(("FAIL", f"filesystem watcher unavailable: {exc}"))
+    project_config = find_project_config(Path.cwd())
+    if project_config:
+        try:
+            project = load_project_config(project_config)
+            missing = [item["relative_path"] for item in project["collections"] if not item["available"]]
+            level = "WARN" if missing else "PASS"
+            suffix = f"; missing: {', '.join(missing)}" if missing else ""
+            findings.append((level, f"project integration config: {project_config} ({len(project['collections'])} collections){suffix}"))
+        except ValueError as exc:
+            findings.append(("FAIL", f"project integration config invalid: {exc}"))
+    else:
+        findings.append(("INFO", "project integration config: no .asset-viewer.toml found from current directory"))
+    findings.append(("PASS", "metadata adapters available: sidecar, isolated PNG text"))
+    webhook_url = os.environ.get("ASSET_VIEWER_WEBHOOK_URL", "").strip()
+    if webhook_url:
+        try:
+            parsed = validate_webhook_url(webhook_url)
+            findings.append(("PASS", f"webhook adapter configured: {parsed.split('://', 1)[0]}://{parsed.split('://', 1)[1].split('/', 1)[0]}"))
+        except ValueError as exc:
+            findings.append(("FAIL", f"webhook adapter configuration invalid: {exc}"))
+    else:
+        findings.append(("INFO", "webhook adapter disabled; set ASSET_VIEWER_WEBHOOK_URL or pass --url when needed"))
+    webhook_state = webhook_status()
+    failed_endpoints = [item for item in webhook_state["endpoints"] if item["last_error"]]
+    if failed_endpoints:
+        findings.append(("WARN", f"webhook delivery state has {len(failed_endpoints)} endpoint(s) with a recorded error; run asset-viewer webhook-status"))
+    elif webhook_state["endpoints"]:
+        findings.append(("PASS", f"webhook delivery state: {len(webhook_state['endpoints'])} endpoint cursor(s), no recorded errors"))
     failures = 0
     for level, text in findings:
         print(f"[{level}] {text}")
@@ -180,6 +217,20 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--present-only", action="store_true", help="Exclude tombstoned/missing assets")
     report.add_argument("--no-images", action="store_true", help="Do not embed thumbnails in HTML reports")
 
+    project_config = sub.add_parser("project-config", help="Inspect the nearest project-owned .asset-viewer.toml")
+    project_config.add_argument("path", nargs="?", default=".")
+    project_config.add_argument("--json", action="store_true")
+
+    project_sync = sub.add_parser("project-sync", help="Register project-declared review folders and import metadata")
+    project_sync.add_argument("path", nargs="?", default=".")
+    project_sync.add_argument("--dry-run", action="store_true", help="Validate and show the plan without changing Asset Viewer state")
+    project_sync.add_argument("--json", action="store_true")
+
+    metadata_import = sub.add_parser("metadata-import", help="Import sidecar/PNG generation metadata for one collection")
+    metadata_import.add_argument("collection")
+    metadata_import.add_argument("--adapter", action="append", choices=["sidecar", "png_text"], dest="adapters")
+    metadata_import.add_argument("--json", action="store_true")
+
     metadata = sub.add_parser("metadata", help="Read or update optional provenance/generation metadata")
     metadata.add_argument("collection")
     metadata.add_argument("asset", help="Stable asset ID or relative path")
@@ -209,6 +260,21 @@ def build_parser() -> argparse.ArgumentParser:
     events.add_argument("--after", type=int, default=0, dest="after_id")
     events.add_argument("--limit", type=int, default=100)
     events.add_argument("--json", action="store_true")
+
+    webhook = sub.add_parser("webhook", help="Deliver review events to an outbound webhook with a durable cursor")
+    webhook.add_argument("--url", default=os.environ.get("ASSET_VIEWER_WEBHOOK_URL"))
+    webhook.add_argument("--collection")
+    webhook.add_argument("--secret", default=os.environ.get("ASSET_VIEWER_WEBHOOK_SECRET", ""))
+    webhook.add_argument("--once", action="store_true", help="Deliver one available batch and exit")
+    webhook.add_argument("--replay", action="store_true", help="Replay existing history on first use instead of starting at the latest event")
+    webhook.add_argument("--after", type=int, dest="after_id", help="Explicit event cursor; overrides saved state")
+    webhook.add_argument("--interval", type=float, default=2.0)
+    webhook.add_argument("--batch-size", type=int, default=100)
+    webhook.add_argument("--timeout", type=float, default=10.0)
+    webhook.add_argument("--json", action="store_true")
+
+    webhook_status_cmd = sub.add_parser("webhook-status", help="Show sanitized webhook cursor/error state")
+    webhook_status_cmd.add_argument("--json", action="store_true")
 
     wait = sub.add_parser("wait-for-review", help="Wait until review is explicitly complete")
     wait.add_argument("--collection")
@@ -408,6 +474,37 @@ def main() -> None:
             else:
                 Path(args.output).expanduser().write_text(payload)
                 print(f"Wrote {args.output}")
+        elif args.command == "project-config":
+            payload = load_project_config(args.path)
+            if args.json:
+                print(json.dumps(payload, indent=2, sort_keys=True))
+            else:
+                print(f"Project: {payload['project']} ({payload['config_path']})")
+                for item in payload["collections"]:
+                    marker = "ready" if item["available"] else "missing"
+                    print(f"{marker}\t{item['group']}\t{item['label']}\t{item['relative_path']}\t{','.join(item['adapters'])}")
+        elif args.command == "project-sync":
+            payload = sync_project(args.path, dry_run=args.dry_run)
+            if args.json:
+                print(json.dumps(payload, indent=2, sort_keys=True))
+            else:
+                for item in payload["collections"]:
+                    if args.dry_run:
+                        action = "would register" if item["available"] else "missing"
+                    else:
+                        action = "registered" if item["registered"] else "missing"
+                    imported = (item.get("metadata") or {}).get("imported", 0)
+                    print(f"{action}\t{item['label']}\t{item['relative_path']}\tmetadata={imported}")
+        elif args.command == "metadata-import":
+            adapters = args.adapters or ["sidecar", "png_text"]
+            scan_registered(args.collection)
+            payload = import_collection_metadata(args.collection, adapters)
+            if args.json:
+                print(json.dumps(payload, indent=2, sort_keys=True))
+            else:
+                print(f"{args.collection}: imported={payload['imported']} skipped={payload['skipped']} errors={len(payload['errors'])}")
+                for error in payload["errors"]:
+                    print(f"ERROR\t{error['rel']}\t{error['error']}")
         elif args.command == "metadata":
             patch = {}
             for assignment in args.set:
@@ -462,6 +559,27 @@ def main() -> None:
                 for event in payload["events"]:
                     target = event["rel"] or "(collection)"
                     print(f"{event['id']}\t{event['created_at']}\t{event['collection']}\t{target}\t{event['action']}")
+        elif args.command == "webhook":
+            if not args.url:
+                raise ValueError("--url or ASSET_VIEWER_WEBHOOK_URL is required")
+            result = run_webhook(
+                args.url, collection=args.collection, secret=args.secret, once=args.once, replay=args.replay,
+                after_id=args.after_id, interval=args.interval, batch_size=args.batch_size, timeout=args.timeout,
+            )
+            if args.json:
+                print(json.dumps(result, indent=2, sort_keys=True))
+            else:
+                print(f"webhook delivered={result['delivered']} last_event_id={result['last_event_id']} initialized={result['initialized']}")
+        elif args.command == "webhook-status":
+            payload = webhook_status()
+            if args.json:
+                print(json.dumps(payload, indent=2, sort_keys=True))
+            elif not payload["endpoints"]:
+                print("No webhook cursor state yet.")
+            else:
+                for endpoint in payload["endpoints"]:
+                    suffix = f" ERROR={endpoint['last_error']}" if endpoint["last_error"] else ""
+                    print(f"{endpoint['endpoint_id']}\t{endpoint['host']}\t{endpoint['collection']}\tlast_event_id={endpoint['last_event_id']}{suffix}")
         elif args.command == "wait-for-review":
             timeout = max(0.0, args.timeout)
             interval = max(0.1, args.interval)

@@ -27,6 +27,14 @@
   <section id="activityView" class="activity-view hidden"><div class="activity-heading"><strong>Activity</strong><span id="activitySummary"></span></div><div id="activityList" class="activity-list"></div></section>
 </main>
 
+<div id="commandPalette" class="command-palette hidden" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="command-box">
+    <input id="commandSearch" type="search" autocomplete="off" placeholder="Type a command…" aria-label="Command search">
+    <div id="commandList" class="command-list" role="listbox"></div>
+    <span class="command-hint">Enter to run · ↑/↓ to move · Esc to close</span>
+  </div>
+</div>
+
 <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Image review">
   <button class="icon-button close" id="close" type="button" aria-label="Close">×</button><button class="icon-button nav prev" id="prev" type="button" aria-label="Previous image">‹</button>
   <section class="stage">

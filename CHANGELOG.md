@@ -4,10 +4,18 @@ All notable changes to Asset Viewer will be documented here.
 
 ## Unreleased
 
+## 0.9.0 — 2026-09-15
+
 - Replace the generic six-card demo with a coherent fictional Northline Coffee summer campaign designed to demonstrate a real creative-review loop.
 - Seed example approve / maybe / reject decisions, review notes, provenance, and a preferred two-variant hero family while leaving two assets genuinely pending for first-run review.
 - Make demo generation idempotent by removing only known current/legacy demo filenames and preserving unrelated files in the target folder.
 - Refresh the README with screenshots captured from the actual Asset Viewer UI running the new demo, including the real side-by-side family comparison workflow.
+- Add project-native `.asset-viewer.toml` discovery and idempotent project sync.
+- Add sidecar and isolated PNG metadata adapters for generation provenance.
+- Add durable outbound review webhooks with signed delivery and cursor state.
+- Add project integration and sync tools to the optional MCP adapter.
+- Add saved-view and command-palette UI affordances while preserving progressive disclosure.
+- Extend doctor diagnostics for project integration, metadata adapters, watcher state, and webhooks.
 
 ## 0.8.0 — 2026-09-13
 
