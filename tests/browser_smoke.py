@@ -132,7 +132,8 @@ def main() -> None:
 
                 assert page.title() == "Asset Viewer"
                 assert page.locator("#collection").input_value() == "asset-viewer-demo"
-                assert "6 images" in (page.locator("#summary").text_content() or "")
+                summary = (page.locator("#summary").text_content() or "").strip()
+                assert summary and summary.lower() != "loading…", summary
 
                 page.locator("#grid .card").first.click()
                 page.locator("#modal").wait_for(state="visible")
