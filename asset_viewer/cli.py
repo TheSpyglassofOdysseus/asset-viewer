@@ -8,8 +8,6 @@ import sys
 import time
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
-
 from . import __version__
 from .app import LOOPBACK_HOSTS, capability_document, scan_collection, serve as development_serve
 from .wsgi import serve as production_serve
@@ -17,6 +15,7 @@ from .report import render_review_report
 from .mcp_server import run_mcp
 from .activity import activity_feed
 from .handoff import approved_handoff, copy_approved_set
+from .demo_assets import DEMO_COLLECTION_LABEL, DEMO_FAMILY, DEMO_PROJECT, DEMO_REVIEWS, create_demo
 from .storage import (
     add_collection,
     asset_metadata,
@@ -48,30 +47,9 @@ from .storage import (
     review_manifest,
     root_for,
     undo_last_review,
+    set_review,
 )
 
-
-def create_demo(directory: Path) -> None:
-    directory.mkdir(parents=True, exist_ok=True)
-    specs = [
-        ("launch-poster.png", "Launch Poster", (34, 50, 75), (235, 244, 255)),
-        ("product-card.png", "Product Card", (45, 79, 61), (235, 255, 241)),
-        ("social-square.png", "Social Square", (76, 44, 84), (252, 239, 255)),
-        ("banner-wide.png", "Banner Wide", (89, 61, 34), (255, 247, 229)),
-        ("concept-a.png", "Concept A", (42, 42, 42), (247, 247, 247)),
-        ("concept-b.png", "Concept B", (28, 63, 82), (235, 249, 255)),
-    ]
-    default_font = ImageFont.load_default()
-    for index, (name, title, background, foreground) in enumerate(specs, 1):
-        size = (1200, 800) if "wide" not in name else (1400, 600)
-        image = Image.new("RGB", size, background)
-        draw = ImageDraw.Draw(image)
-        margin = 70
-        draw.rounded_rectangle((margin, margin, size[0] - margin, size[1] - margin), radius=28, outline=foreground, width=3)
-        draw.text((margin + 45, margin + 40), "ASSET VIEWER / DEMO", fill=foreground, font=default_font)
-        draw.text((margin + 45, size[1] // 2 - 18), title, fill=foreground, font=default_font)
-        draw.text((margin + 45, size[1] - margin - 70), f"Synthetic review asset {index:02d}", fill=foreground, font=default_font)
-        image.save(directory / name)
 
 
 def scan_registered(collection: str | None = None) -> list[tuple[str, int, bool]]:
@@ -668,8 +646,27 @@ def main() -> None:
         elif args.command == "demo":
             path = Path(args.path).expanduser().resolve()
             create_demo(path)
-            row = add_collection(str(path), "Asset Viewer Demo")
+            row = add_collection(str(path), DEMO_COLLECTION_LABEL)
+            scan_collection(row["slug"], force=True)
+            manifest = review_manifest(row["slug"])
+            current = {item["rel"]: item.get("status") for item in manifest["items"]}
+            for rel, (status, comment) in DEMO_REVIEWS.items():
+                if not current.get(rel):
+                    set_review(row["slug"], rel, status, comment)
+            records = {item["rel"]: item for item in catalog_records(row["slug"], present_only=True)}
+            for rel, record in records.items():
+                set_asset_metadata(row["slug"], record["asset_id"], {
+                    "source_project": DEMO_PROJECT,
+                    "tool": "asset-viewer-demo",
+                    "model": "synthetic-demo",
+                    "run_id": "summer-launch",
+                })
+            family_name, members, preferred = DEMO_FAMILY
+            if not any(family["name"] == family_name for family in families_for_collection(row["slug"])):
+                member_ids = [records[rel]["asset_id"] for rel in members]
+                create_family(row["slug"], family_name, member_ids, records[preferred]["asset_id"])
             print(f"Created and registered demo collection: {row['path']}")
+            print("Seeded a realistic campaign review with approvals, feedback, and A/B hero variants.")
             print("Run: asset-viewer serve")
         else:
             parser.print_help()
