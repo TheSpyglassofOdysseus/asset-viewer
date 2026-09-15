@@ -2,6 +2,13 @@
 
 All notable changes to Asset Viewer will be documented here.
 
+## Unreleased
+
+- Replace the generic six-card demo with a coherent fictional Northline Coffee summer campaign designed to demonstrate a real creative-review loop.
+- Seed example approve / maybe / reject decisions, review notes, provenance, and a preferred two-variant hero family while leaving two assets genuinely pending for first-run review.
+- Make demo generation idempotent by removing only known current/legacy demo filenames and preserving unrelated files in the target folder.
+- Refresh the README with screenshots captured from the actual Asset Viewer UI running the new demo, including the real side-by-side family comparison workflow.
+
 ## 0.8.0 — 2026-09-13
 
 Context-and-handoff release.

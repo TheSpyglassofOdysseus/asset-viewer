@@ -8,13 +8,21 @@ Asset Viewer gives humans a clean place to **see, compare, approve, defer, and r
 
 It was built for a simple workflow problem: agents and creative tools are increasingly good at producing images, but the review step often degenerates into oversized chat attachments, IDE file trees, temporary uploads, or copies scattered across cloud drives. Asset Viewer keeps review separate from storage.
 
-![Asset Viewer demo](docs/screenshot.png)
+### Compare the attempts, not chat attachments
 
-### Precision review
+Group related generations into a variant family and compare them side by side with linked zoom/pan, overlay, or difference views. Review state and notes stay attached to the exact assets.
 
-Open an exact asset, leave point/region feedback, compare variants with linked zoom/pan, and keep the full-resolution original out of the routine review path.
+![Actual Asset Viewer side-by-side comparison of two Northline Coffee demo variants](docs/precision-review.png)
 
-![Asset Viewer precision review](docs/precision-review.png)
+*Actual Asset Viewer UI. The built-in demo seeds a fictional Northline Coffee campaign so the review workflow is visible immediately after install.*
+
+### Review a realistic batch
+
+The demo includes a product-first hero, a lifestyle alternative, an intentionally bad crop, a product lineup, a lifestyle concept, and a homepage banner. It arrives with a few example decisions and two assets still waiting for review, so a new user sees the real approve / maybe / reject loop instead of generic placeholder rectangles.
+
+![Actual Asset Viewer gallery showing the Northline Coffee demo review queue](docs/screenshot.png)
+
+From there the same decisions are available to humans and automation through the Activity view, CLI, JSON API, approved-set handoff, and optional MCP adapter.
 
 ## Why it exists
 
