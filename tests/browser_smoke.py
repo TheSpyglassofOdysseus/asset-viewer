@@ -8,6 +8,7 @@ import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Callable
@@ -139,11 +140,23 @@ def main() -> None:
                 page.locator("#modal").wait_for(state="visible")
                 assert page.locator("#filename").inner_text().strip()
 
-                page.locator("#reviewStatus").select_option("approved")
+                with page.expect_response(
+                    lambda response: urllib.parse.urlsplit(response.url).path == "/api/review"
+                    and response.request.method == "POST",
+                    timeout=15_000,
+                ) as review_response_info:
+                    page.locator("#reviewStatus").select_option("approved")
+                review_response = review_response_info.value
+                assert review_response.ok, f"review mutation returned HTTP {review_response.status}"
                 wait_until(
-                    "approved review state",
-                    lambda: "approved" in (page.locator("#reviewDecision").text_content() or "").lower(),
+                    "approved status selector",
+                    lambda: page.locator("#reviewStatus").input_value() == "approved",
                 )
+
+                reviews = get_json(f"{base_url}/api/reviews?collection=asset-viewer-demo&present=1")
+                approved = [item for item in reviews.get("items", []) if item.get("status") == "approved"]
+                assert len(approved) == 1, reviews
+
                 page.locator("#close").click()
                 page.locator("#modal").wait_for(state="hidden")
 
