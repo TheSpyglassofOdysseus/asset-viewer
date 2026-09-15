@@ -122,3 +122,42 @@ def inspect_images_worker(
     finally:
         with suppress(Exception):
             sender.close()
+
+
+def inspect_png_text_worker(
+    source_text: str,
+    max_source_bytes: int,
+    memory_bytes: int,
+    sender: Any,
+) -> None:
+    """Read bounded textual PNG metadata inside the disposable decoder boundary."""
+    try:
+        _apply_resource_limits(memory_bytes)
+        source = Path(source_text)
+        if source.stat().st_size > max_source_bytes:
+            raise ValueError("file exceeds configured metadata byte limit")
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(source) as image:
+                if image.format != "PNG":
+                    sender.send({"ok": True, "metadata": {}})
+                    return
+                metadata: dict[str, Any] = {}
+                total = 0
+                for key, value in image.info.items():
+                    if not isinstance(key, str) or not isinstance(value, (str, int, float, bool)):
+                        continue
+                    text = str(value)
+                    if len(text) > 50000:
+                        text = text[:50000]
+                    total += len(key) + len(text)
+                    if total > 128000:
+                        break
+                    metadata[key[:200]] = text
+        sender.send({"ok": True, "metadata": metadata})
+    except BaseException as exc:
+        with suppress(Exception):
+            sender.send({"ok": False, "error": f"{type(exc).__name__}: {exc}"[:500], "metadata": {}})
+    finally:
+        with suppress(Exception):
+            sender.close()

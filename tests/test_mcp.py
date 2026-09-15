@@ -51,7 +51,7 @@ class McpAdapterTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         names = {tool.name for tool in tools}
         self.assertTrue({"list_collections", "get_reviews", "get_pending", "get_events", "refresh_collections"} <= names)
-        self.assertTrue({"get_activity", "get_provenance", "set_provenance", "get_approved_handoff"} <= names)
+        self.assertTrue({"get_activity", "get_provenance", "set_provenance", "get_approved_handoff", "inspect_project_config", "sync_project_config"} <= names)
 
 
 if __name__ == "__main__":
