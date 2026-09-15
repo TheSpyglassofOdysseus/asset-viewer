@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{font-family:system-ui,-apple-system,sans-serif;color-scheme:light dark}
+body{margin:0;padding:12px}*{box-sizing:border-box}
+header{display:flex;gap:8px;align-items:baseline;justify-content:space-between;margin-bottom:10px}
+h2{font-size:16px;margin:0}.meta{font-size:12px;opacity:.7}
+.compare{display:grid;grid-template-columns:1fr 1fr;gap:10px}.pane{min-width:0}
+.label{font-size:12px;font-weight:650;margin:0 0 5px}
+.frame{background:rgba(127,127,127,.08);border:1px solid rgba(127,127,127,.24);border-radius:8px;min-height:120px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.frame img{display:block;max-width:100%;max-height:48vh;object-fit:contain}.empty{padding:24px;font-size:12px;opacity:.65}
+.summary{font-size:12px;line-height:1.45;margin:8px 0}.history{max-height:110px;overflow:auto;border-top:1px solid rgba(127,127,127,.2);padding-top:7px}
+.history div{margin:3px 0}.annotations{font-size:12px;margin-top:7px}.annotations ul{margin:4px 0 0;padding-left:18px}
+textarea{width:100%;min-height:54px;resize:vertical;margin:9px 0 7px;padding:8px;border-radius:7px;border:1px solid rgba(127,127,127,.3);font:inherit}
+.actions{display:flex;gap:7px;flex-wrap:wrap}.actions button,.link{min-height:44px;padding:8px 12px;border-radius:7px;border:1px solid rgba(127,127,127,.3);background:transparent;color:inherit;font-weight:650;cursor:pointer}
+.actions button:disabled{opacity:.45;cursor:wait}.link{text-decoration:none;display:inline-flex;align-items:center}.status{font-size:12px;margin-top:7px;min-height:18px}
+@media(max-width:560px){.compare{grid-template-columns:1fr}.frame img{max-height:22vh}.history{max-height:84px}.summary{margin:5px 0}}
+</style>
+</head>
+<body>
+<header><div><h2 id="title">Visual decision</h2><div class="meta" id="meta"></div></div><a id="viewer" class="link" target="_blank" rel="noopener">Open viewer</a></header>
+<div class="compare">
+<section class="pane"><p class="label">Candidate</p><div class="frame" id="candidateFrame"></div><div class="summary" id="candidateSummary"></div></section>
+<section class="pane"><p class="label">Accepted reference</p><div class="frame" id="referenceFrame"></div><div class="summary" id="referenceSummary"></div></section>
+</div>
+<div class="annotations" id="annotations"></div><div class="history" id="history"></div>
+<textarea id="comment" maxlength="10000" placeholder="Optional review note"></textarea>
+<div class="actions"><button data-status="approved">Approve</button><button data-status="maybe">Maybe</button><button data-status="rejected">Reject</button></div>
+<div class="status" id="status"></div>
+<script>
+const pending=new Map();let nextId=1;let context=null;
+function request(method,params){const id=nextId++;window.parent.postMessage({jsonrpc:"2.0",id,method,params},"*");return new Promise((resolve,reject)=>pending.set(id,{resolve,reject}));}
+function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+function image(frame,item,alt){frame.innerHTML="";if(!item){frame.innerHTML='<div class="empty">No accepted reference yet.</div>';return;}const img=document.createElement("img");img.src=item.preview_url;img.alt=alt;img.loading="eager";frame.appendChild(img);}
+function details(item){if(!item)return "";const bits=[item.status||"unreviewed",item.viewport,item.device,item.git_commit?item.git_commit.slice(0,10):"",item.run_id].filter(Boolean);return `<b>${esc(item.rel)}</b><br>${esc(bits.join(" · "))}${item.comment?`<br>${esc(item.comment)}`:""}`;}
+function render(data){context=data;if(!data?.candidate)return;document.getElementById("title").textContent=data.surface||"Visual decision";document.getElementById("meta").textContent=[data.collection,data.viewport].filter(Boolean).join(" · ");document.getElementById("viewer").href=data.viewer_url;image(document.getElementById("candidateFrame"),data.candidate,"Current candidate");image(document.getElementById("referenceFrame"),data.reference,"Accepted reference");document.getElementById("candidateSummary").innerHTML=details(data.candidate);document.getElementById("referenceSummary").innerHTML=details(data.reference);const anns=data.candidate.annotations||[];document.getElementById("annotations").innerHTML=anns.length?`<b>Open annotations (${anns.length})</b><ul>${anns.slice(0,6).map(a=>`<li>${esc(a.text||a.comment||"Annotation")}</li>`).join("")}</ul>`:"";const decisions=data.prior_decisions||[];document.getElementById("history").innerHTML=decisions.length?`<b>Recent decisions</b>${decisions.slice(0,6).map(d=>`<div>${esc(d.status)} — ${esc(d.rel)}${d.comment?`: ${esc(d.comment)}`:""}</div>`).join("")}`:"";document.getElementById("comment").value=data.candidate.comment||"";document.getElementById("status").textContent=`Current: ${data.candidate.status||"unreviewed"}`;}
+async function decide(status){if(!context?.candidate)return;const buttons=[...document.querySelectorAll("button[data-status]")];buttons.forEach(b=>b.disabled=true);document.getElementById("status").textContent="Saving…";try{const result=await request("tools/call",{name:"record_visual_review",arguments:{collection:context.collection,asset:context.candidate.asset_id,status,comment:document.getElementById("comment").value,explicit_human_action:true}});const out=result?.structuredContent||result;if(out?.status){context.candidate.status=out.status;context.candidate.comment=out.comment||"";document.getElementById("candidateSummary").innerHTML=details(context.candidate);document.getElementById("status").textContent=`Saved: ${out.status}`;}else{document.getElementById("status").textContent="Review saved.";}}catch(e){document.getElementById("status").textContent="Could not save review.";}finally{buttons.forEach(b=>b.disabled=false);}}
+document.querySelectorAll("button[data-status]").forEach(b=>b.addEventListener("click",()=>decide(b.dataset.status)));
+window.addEventListener("message",event=>{if(event.source!==window.parent)return;const m=event.data;if(!m||m.jsonrpc!=="2.0")return;if(m.id!==undefined&&pending.has(m.id)){const p=pending.get(m.id);pending.delete(m.id);m.error?p.reject(m.error):p.resolve(m.result);return;}if(m.method==="ui/notifications/tool-result")render(m.params?.structuredContent);},{passive:true});
+if(window.openai?.toolOutput)render(window.openai.toolOutput);
+</script>
+</body>
+</html>
