@@ -23,6 +23,25 @@ jobs:
       - run: pip install -e .
       - run: python -m unittest discover -v
       - run: python -m compileall -q asset_viewer tests
+      - run: node --check asset_viewer/static/app.js
+
+  browser-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip build
+      - run: python -m build
+      - name: Install built wheel in clean environment
+        run: |
+          python -m venv /tmp/asset-viewer-browser-smoke
+          /tmp/asset-viewer-browser-smoke/bin/python -m pip install --upgrade pip
+          /tmp/asset-viewer-browser-smoke/bin/pip install dist/local_asset_viewer-*.whl 'playwright==1.62.0'
+          /tmp/asset-viewer-browser-smoke/bin/python -m pip check
+      - run: /tmp/asset-viewer-browser-smoke/bin/python -m playwright install --with-deps chromium
+      - run: /tmp/asset-viewer-browser-smoke/bin/python tests/browser_smoke.py
 
   dependency-review:
     if: github.event_name == 'pull_request'
