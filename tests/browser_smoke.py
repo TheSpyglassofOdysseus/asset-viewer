@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import socket
 import subprocess
@@ -20,7 +21,7 @@ def free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-def wait_until(description: str, condition: Callable[[], bool], timeout: float = 10.0) -> None:
+def wait_until(description: str, condition: Callable[[], bool], timeout: float = 15.0) -> None:
     deadline = time.monotonic() + timeout
     last_error: Exception | None = None
     while time.monotonic() < deadline:
@@ -32,6 +33,14 @@ def wait_until(description: str, condition: Callable[[], bool], timeout: float =
         time.sleep(0.1)
     detail = f"; last error: {last_error}" if last_error else ""
     raise AssertionError(f"Timed out waiting for {description}{detail}")
+
+
+def get_json(url: str) -> dict:
+    with urllib.request.urlopen(url, timeout=30.0) as response:
+        assert response.status == 200, f"GET {url} returned {response.status}"
+        payload = json.load(response)
+    assert isinstance(payload, dict), f"GET {url} did not return a JSON object"
+    return payload
 
 
 def wait_for_server(base_url: str, process: subprocess.Popen[str], timeout: float = 30.0) -> None:
@@ -88,23 +97,42 @@ def main() -> None:
 
         try:
             wait_for_server(base_url, process)
+
+            # Prove the documented demo -> serve path populates the catalog on
+            # the first normal gallery request before exercising the browser UI.
+            gallery = get_json(f"{base_url}/api/gallery")
+            assert gallery.get("active") == "asset-viewer-demo", gallery
+            assert len(gallery.get("images") or []) == 6, gallery
+            assert not (gallery.get("scan") or {}).get("truncated"), gallery.get("scan")
+
             page_errors: list[str] = []
+            console_errors: list[str] = []
             with sync_playwright() as playwright:
                 browser = playwright.chromium.launch(headless=True)
                 page = browser.new_page(viewport={"width": 1280, "height": 900})
                 page.on("pageerror", lambda error: page_errors.append(str(error)))
+                page.on(
+                    "console",
+                    lambda message: console_errors.append(message.text) if message.type == "error" else None,
+                )
 
-                response = page.goto(base_url, wait_until="networkidle")
+                response = page.goto(base_url, wait_until="domcontentloaded")
                 assert response is not None and response.ok, "initial gallery request failed"
                 page.locator("#summary").wait_for(state="visible")
-                wait_until(
-                    "six demo images to render",
-                    lambda: "6 images" in (page.locator("#summary").text_content() or ""),
-                )
+                try:
+                    wait_until(
+                        "six demo images to render",
+                        lambda: page.locator("#grid .card").count() == 6,
+                    )
+                except AssertionError as exc:
+                    summary = page.locator("#summary").text_content()
+                    raise AssertionError(
+                        f"{exc}; summary={summary!r}; page_errors={page_errors!r}; console_errors={console_errors!r}"
+                    ) from exc
 
                 assert page.title() == "Asset Viewer"
                 assert page.locator("#collection").input_value() == "asset-viewer-demo"
-                assert page.locator("#grid .card").count() == 6
+                assert "6 images" in (page.locator("#summary").text_content() or "")
 
                 page.locator("#grid .card").first.click()
                 page.locator("#modal").wait_for(state="visible")
@@ -126,6 +154,7 @@ def main() -> None:
                 )
 
                 assert not page_errors, f"browser page errors: {page_errors}"
+                assert not console_errors, f"browser console errors: {console_errors}"
                 browser.close()
         finally:
             process.terminate()
