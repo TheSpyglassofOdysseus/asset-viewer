@@ -202,7 +202,6 @@ function applyFilter() {
       toggleSelection(Number(button.dataset.select));
     };
   });
-  updateSelectAll();
 }
 
 function setMenu(select, placeholder, items) {
