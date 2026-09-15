@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import random
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -90,11 +89,14 @@ def _can(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], body: tuple[
 def _glass(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int]) -> None:
     x0, y0, x1, y1 = box
     draw.rounded_rectangle(box, radius=22, fill=(89, 48, 24), outline=(238, 225, 200), width=6)
-    rng = random.Random(17)
-    for _ in range(8):
-        x = rng.randint(x0 + 18, x1 - 55)
-        y = rng.randint(y0 + 22, y1 - 70)
-        s = rng.randint(30, 52)
+    ice = ((22, 36, 38), (74, 82, 46), (132, 48, 34), (154, 136, 42),
+           (40, 172, 50), (104, 214, 36), (158, 250, 44), (62, 292, 40))
+    width = max(1, x1 - x0)
+    height = max(1, y1 - y0)
+    for dx, dy, size in ice:
+        s = min(size, max(18, min(width, height) // 4))
+        x = min(x0 + 18 + dx, x1 - s - 12)
+        y = min(y0 + 22 + dy, y1 - s - 12)
         draw.rounded_rectangle((x, y, x + s, y + s), radius=9, fill=(205, 156, 94), outline=(239, 214, 169), width=2)
     draw.text(((x0 + x1) // 2, (y0 + y1) // 2 + 25), "NORTHLINE", anchor="mm", fill="white", font=_font(24))
 
@@ -114,12 +116,11 @@ def _coast(image: Image.Image, *, sunset: bool = False) -> ImageDraw.ImageDraw:
 def _hero_product(path: Path) -> None:
     image = _gradient((1200, 800), (173, 220, 240), (239, 226, 191))
     draw = _coast(image)
-    rng = random.Random(42)
-    for _ in range(45):
-        x = rng.randint(520, 1140)
-        y = rng.randint(565, 770)
-        s = rng.randint(18, 55)
-        draw.polygon(((x, y), (x + s, y - s // 2), (x + s * 2, y + 5), (x + s, y + s)), fill=(225, 247, 252), outline=(180, 218, 230))
+    for index in range(45):
+        x = 520 + ((index * 83) % 620)
+        y = 565 + ((index * 47) % 205)
+        size = 18 + ((index * 19) % 38)
+        draw.polygon(((x, y), (x + size, y - size // 2), (x + size * 2, y + 5), (x + size, y + size)), fill=(225, 247, 252), outline=(180, 218, 230))
     _brand(draw, (70, 75))
     _headline(draw, (70, 250), ["Good Coffee", "Brighter Days"])
     draw.text((73, 400), "SUMMER LAUNCH  /  PRODUCT-FOCUSED HERO", fill=(41, 64, 78), font=_font(21))
