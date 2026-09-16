@@ -9,6 +9,7 @@ from .handoff import approved_handoff
 from .visual_context import (
     VISUAL_PANEL_URI,
     get_visual_context as build_visual_context,
+    panel_preview_meta,
     record_visual_review as persist_visual_review,
     visual_decision_panel_html,
     visual_panel_resource_meta,
@@ -171,13 +172,21 @@ def get_visual_context(
     return build_visual_context(collection, surface, viewport, candidate, base_url)
 
 
-def render_visual_decision_panel(context: dict[str, Any]) -> dict[str, Any]:
+def render_visual_decision_panel(context: dict[str, Any]):
     """Render context returned by get_visual_context. Call get_visual_context first and pass its result unchanged."""
     if not isinstance(context, dict) or not isinstance(context.get("candidate"), dict):
         raise ValueError("context must be a get_visual_context result with a candidate")
     if int((context.get("render_contract") or {}).get("max_primary_images") or 0) > 2:
         raise ValueError("visual panel supports at most two primary images")
-    return context
+    try:
+        from mcp.types import CallToolResult, TextContent
+    except ImportError as exc:  # pragma: no cover - optional MCP integration
+        raise RuntimeError('MCP support requires: pip install "local-asset-viewer[mcp]"') from exc
+    return CallToolResult(
+        structuredContent=context,
+        content=[TextContent(type="text", text="Visual decision panel ready.")],
+        _meta=panel_preview_meta(context),
+    )
 
 
 def record_visual_review(

@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import base64
 import os
 import urllib.parse
 from pathlib import Path
 from typing import Any
 
-from .storage import annotations_for_asset, catalog_records, review_history, set_review
+from .storage import annotations_for_asset, catalog_records, review_history, safe_file, set_review
 
 VISUAL_PANEL_URI = "ui://asset-viewer/visual-decision-panel/v1.html"
 _ALLOWED_REVIEW_STATUSES = {"approved", "maybe", "rejected"}
+MAX_INLINE_PREVIEW_BYTES = 2 * 1024 * 1024
 
 
 def _text(value: Any) -> str:
@@ -244,6 +246,44 @@ def record_visual_review(
     }
 
 
+def panel_preview_meta(context: dict[str, Any]) -> dict[str, Any]:
+    """Hydrate at most two bounded JPEG previews for a private/tunneled widget.
+
+    The bytes belong in MCP tool-result `_meta`, so ChatGPT can give them to
+    the component without copying them into model-visible structured content.
+    """
+    from .app import make_review_preview, make_thumbnail
+
+    previews: dict[str, str] = {}
+    for key in ("candidate", "reference"):
+        item = context.get(key)
+        if not isinstance(item, dict):
+            continue
+        collection = _text(item.get("collection"))
+        rel = _text(item.get("rel"))
+        asset_id = _text(item.get("asset_id"))
+        if not collection or not rel or not asset_id:
+            continue
+        source = safe_file(collection, rel)
+        if source is None:
+            continue
+        payload = make_review_preview(source)
+        if len(payload) > MAX_INLINE_PREVIEW_BYTES:
+            payload = make_thumbnail(source)
+        if len(payload) > MAX_INLINE_PREVIEW_BYTES:
+            continue
+        previews[asset_id] = "data:image/jpeg;base64," + base64.b64encode(payload).decode("ascii")
+        if len(previews) >= 2:
+            break
+    return {
+        "assetViewer": {
+            "previewDataByAssetId": previews,
+            "previewCount": len(previews),
+            "maxPreviewBytes": MAX_INLINE_PREVIEW_BYTES,
+        }
+    }
+
+
 def visual_panel_resource_meta() -> dict[str, Any]:
     base = _normalize_base_url("")
     parsed = urllib.parse.urlsplit(base)
@@ -252,7 +292,7 @@ def visual_panel_resource_meta() -> dict[str, Any]:
         "ui": {
             "prefersBorder": True,
             "csp": {
-                "resourceDomains": [origin],
+                "resourceDomains": [origin, "data:"],
                 "connectDomains": [],
             },
         }

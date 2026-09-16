@@ -1,5 +1,6 @@
 import asyncio
 import importlib.util
+import json
 import os
 import tempfile
 import unittest
@@ -12,6 +13,7 @@ from asset_viewer.app import scan_collection
 from asset_viewer.visual_context import (
     VISUAL_PANEL_URI,
     get_visual_context,
+    panel_preview_meta,
     record_visual_review,
     visual_decision_panel_html,
 )
@@ -112,11 +114,35 @@ class VisualContextTests(unittest.TestCase):
         events = storage.review_events_since("fdi-captures", 0, 100)["events"]
         self.assertTrue(any(event["rel"] == "candidate.png" and event["new_status"] == "maybe" for event in events))
 
+    def test_private_preview_hydration_stays_widget_only_and_bounded(self):
+        context = get_visual_context(
+            "fdi-captures", "Quote Editor", viewport="412x915", candidate="candidate.png"
+        )
+        meta = panel_preview_meta(context)
+        private = meta["assetViewer"]
+        self.assertEqual(private["previewCount"], 2)
+        self.assertEqual(len(private["previewDataByAssetId"]), 2)
+        self.assertTrue(all(value.startswith("data:image/jpeg;base64,") for value in private["previewDataByAssetId"].values()))
+        self.assertNotIn("data:image/jpeg;base64,", json.dumps(context))
+        self.assertLessEqual(len(private["previewDataByAssetId"]), context["render_contract"]["max_primary_images"])
+
+    @unittest.skipUnless(importlib.util.find_spec("mcp"), "optional mcp SDK is not installed")
+    def test_render_result_puts_preview_bytes_in_hidden_meta(self):
+        context = get_visual_context(
+            "fdi-captures", "Quote Editor", viewport="412x915", candidate="candidate.png"
+        )
+        result = mcp_server.render_visual_decision_panel(context)
+        self.assertEqual(result.structured_content, context)
+        self.assertEqual(result.meta["assetViewer"]["previewCount"], 2)
+        self.assertNotIn("data:image/jpeg;base64,", json.dumps(result.structured_content))
+
     def test_panel_is_bounded_and_uses_mcp_apps_bridge(self):
         source = visual_decision_panel_html()
         self.assertIn('request("tools/call"', source)
         self.assertIn("ui/notifications/tool-result", source)
         self.assertIn("record_visual_review", source)
+        self.assertIn("previewDataByAssetId", source)
+        self.assertIn("toolResponseMetadata", source)
         self.assertIn("explicit_human_action:true", source)
         self.assertNotIn("localStorage", source)
         self.assertNotIn("sessionStorage", source)

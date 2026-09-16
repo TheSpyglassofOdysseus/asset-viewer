@@ -173,6 +173,68 @@ def main() -> None:
 
                 assert not page_errors, f"browser page errors: {page_errors}"
                 assert not console_errors, f"browser console errors: {console_errors}"
+
+                # Exercise the ChatGPT/MCP Apps inline panel independently of
+                # a public image origin. Tool-result `_meta` is widget-only, so
+                # private/tunneled deployments hydrate exactly two bounded
+                # previews without placing image bytes in structuredContent.
+                from asset_viewer.visual_context import visual_decision_panel_html
+
+                panel_errors: list[str] = []
+                panel_console_errors: list[str] = []
+                panel = browser.new_page(viewport={"width": 390, "height": 844})
+                panel.on("pageerror", lambda error: panel_errors.append(str(error)))
+                panel.on(
+                    "console",
+                    lambda message: panel_console_errors.append(message.text) if message.type == "error" else None,
+                )
+                preview = (
+                    "data:image/jpeg;base64,"
+                    "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////"
+                    "2wBDAf//////////////////////////////////////////////////////////////////////////////////////"
+                    "wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAEf/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9oADAMBAAIAAwAAABB//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPxB//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPxB//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxB//9k="
+                )
+                candidate_id = "candidate-private"
+                reference_id = "reference-private"
+                panel_context = {
+                    "collection": "fdi-visual-audit-2026-09-14",
+                    "surface": "Quote Workbook",
+                    "viewport": "390x844",
+                    "viewer_url": "https://viewer.invalid/c/fdi-visual-audit-2026-09-14",
+                    "render_contract": {"max_primary_images": 2},
+                    "candidate": {
+                        "asset_id": candidate_id, "rel": "candidate.png", "status": "",
+                        "preview_url": "http://127.0.0.1:9/unreachable-candidate.jpg",
+                        "annotations": [], "review_history": [],
+                    },
+                    "reference": {
+                        "asset_id": reference_id, "rel": "reference.png", "status": "approved",
+                        "preview_url": "http://127.0.0.1:9/unreachable-reference.jpg",
+                        "annotations": [], "review_history": [],
+                    },
+                    "prior_decisions": [],
+                }
+                hidden_meta = {
+                    "assetViewer": {
+                        "previewDataByAssetId": {candidate_id: preview, reference_id: preview},
+                        "previewCount": 2,
+                    }
+                }
+                panel_bootstrap = (
+                    "<script>window.openai = { toolOutput: " + json.dumps(panel_context) + ", "
+                    "toolResponseMetadata: { mcp_tool_result: { _meta: " + json.dumps(hidden_meta) + " } } };</script>"
+                )
+                panel_html = visual_decision_panel_html().replace("<head>", "<head>" + panel_bootstrap, 1)
+                panel.set_content(panel_html, wait_until="domcontentloaded")
+                panel.locator("#candidateFrame img").wait_for(state="visible")
+                panel.locator("#referenceFrame img").wait_for(state="visible")
+                assert panel.locator("#candidateFrame img").get_attribute("src").startswith("data:image/jpeg;base64,")
+                assert panel.locator("#referenceFrame img").get_attribute("src").startswith("data:image/jpeg;base64,")
+                approve_box = panel.locator('button[data-status="approved"]').bounding_box()
+                assert approve_box and approve_box["y"] + approve_box["height"] <= 844, approve_box
+                assert not panel_errors, f"panel page errors: {panel_errors}"
+                assert not panel_console_errors, f"panel console errors: {panel_console_errors}"
+                panel.close()
                 browser.close()
         finally:
             process.terminate()
