@@ -26,6 +26,27 @@ class WatcherTests(unittest.TestCase):
             os.environ["ASSET_VIEWER_HOME"] = self.old_home
         self.tmp.cleanup()
 
+    def test_read_only_open_does_not_request_reconciliation(self):
+        image = self.images / "existing.png"
+        Image.new("RGB", (20, 20), (4, 5, 6)).save(image)
+        calls = []
+
+        def scan(slug, force):
+            calls.append((slug, force, time.monotonic()))
+
+        watcher = CollectionWatcher(scan, debounce_seconds=0.1, reconcile_interval=3600, registry_interval=0.1)
+        watcher.start()
+        try:
+            deadline = time.monotonic() + 3
+            while not calls and time.monotonic() < deadline:
+                time.sleep(0.05)
+            calls.clear()  # discard the initial correctness reconciliation
+            image.read_bytes()
+            time.sleep(0.5)
+            self.assertEqual(calls, [], "read-only file access triggered reconciliation")
+        finally:
+            watcher.stop()
+
     def test_filesystem_event_requests_reconciliation(self):
         calls = []
 
