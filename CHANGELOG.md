@@ -4,6 +4,13 @@ All notable changes to Asset Viewer will be documented here.
 
 ## Unreleased
 
+- Redesign the browser UI around the real review workflow with a light studio shell, persistent desktop collection rail, collection context, and first-class Gallery / Activity / Approved navigation.
+- Increase gallery image prominence while preserving uncropped `object-fit: contain` review semantics, and strengthen decision/family metadata hierarchy without changing source ownership or canonical review state.
+- Add an Approved workspace backed by the existing approved review filter and integrity-checked handoff/report flows; no second approval store or export model is introduced.
+- Rework Activity into a readable timeline that can show the real matching asset thumbnail when the canonical event references one, without inventing reviewer identity or collaboration data.
+- Refine variant comparison into a lighter inspection workspace while preserving side-by-side, overlay/difference, linked zoom/pan, and the full image area.
+- Add desktop/mobile browser invariants for workspace navigation, Approved-filter restoration, horizontal overflow, and compare image area, plus refresh README screenshots from the actual implemented UI.
+
 ## 0.9.1 — 2026-09-15
 
 - Stop filesystem watching from treating read-only `opened` / `closed_no_write` events as mutations, preventing Asset Viewer reconciliations from feeding back into themselves and consuming CPU while idle.

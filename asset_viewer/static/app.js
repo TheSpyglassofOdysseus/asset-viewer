@@ -23,6 +23,9 @@ let state = {
   activeSavedView: '',
   paletteMatches: [],
   paletteIndex: 0,
+  workspaceTab: 'gallery',
+  galleryFilterBeforeApproved: 'all',
+  scan: {},
 };
 
 const $ = selector => document.querySelector(selector);
@@ -51,7 +54,7 @@ function persistSavedViews() {
 function renderViewMenu() {
   const select = $('#view');
   const saved = state.savedViews.map(item => `<option value="saved:${esc(item.id)}">${esc(item.name)}</option>`).join('');
-  select.innerHTML = '<option value="gallery">Gallery</option><option value="activity">Activity</option>' +
+  select.innerHTML = '<option value="gallery">View & saved views…</option><option value="activity">Activity</option>' +
     (saved ? `<optgroup label="Saved views">${saved}</optgroup>` : '');
   select.value = state.activeSavedView ? `saved:${state.activeSavedView}` : state.view;
 }
@@ -88,10 +91,12 @@ function applySavedView(id) {
   $('#filter').value = record.filter || 'all';
   $('#sort').value = record.sort || 'newest';
   state.view = 'gallery';
+  state.workspaceTab = 'gallery';
   $('#galleryView').classList.remove('hidden');
   $('#activityView').classList.add('hidden');
   applyFilter();
   renderViewMenu();
+  renderWorkspaceState();
   updateCollectionActions();
 }
 
@@ -153,6 +158,7 @@ async function load(requested, force = false) {
   state.families = data.families || [];
   state.active = data.active;
   state.reviewState = data.review_state;
+  state.scan = data.scan || {};
   state.catalogGeneration = Number((data.scan || {}).generation || 0);
   state.selected.clear();
   renderCollections(data.active);
@@ -163,24 +169,85 @@ async function load(requested, force = false) {
     history.replaceState(null, '', collectionUrl(data.active));
   }
 
-  const scan = data.scan || {};
-  const trunc = scan.truncated ? ` · scan incomplete (${scan.reason})` : '';
-  const delta = (scan.added || scan.changed || scan.removed || scan.renamed)
-    ? ` · scan +${scan.added || 0} ~${scan.changed || 0} -${scan.removed || 0} ↪${scan.renamed || 0}`
-    : '';
-  const review = state.reviewState;
-  const pending = review
-    ? ` · ${review.unreviewed} unreviewed · ${review.complete ? 'review complete' : 'review pending'}`
-    : '';
-  $('#summary').textContent = `${data.images.length} images · ${data.collections.length} collections${pending}${trunc}${delta}`;
+  renderWorkspaceState();
   if (requestedAsset) {
     const index = state.filtered.findIndex(asset => (asset.asset_id || asset.rel) === requestedAsset);
     if (index >= 0) openAt(index, false);
   }
 }
 
+function activeCollectionRecord() {
+  return state.collections.find(collection => collection.slug === state.active) || null;
+}
+
+function statusCounts() {
+  return state.images.reduce((counts, asset) => {
+    const key = asset.status || 'unreviewed';
+    counts[key] = (counts[key] || 0) + 1;
+    return counts;
+  }, {approved: 0, maybe: 0, rejected: 0, unreviewed: 0});
+}
+
+function statusDisplay(status) {
+  return ({approved: 'Approved', maybe: 'Maybe', rejected: 'Rejected', '': 'Needs review'})[status || ''] || status;
+}
+
+function formatBytes(value) {
+  const bytes = Number(value || 0);
+  if (!bytes) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
+}
+
+function assetTypeLabel(asset) {
+  const name = asset?.name || asset?.rel || '';
+  const match = name.match(/\.([a-z0-9]+)$/i);
+  return match ? match[1].toUpperCase() : '';
+}
+
+function renderWorkspaceState() {
+  const collection = activeCollectionRecord();
+  const counts = statusCounts();
+  const title = collection?.label || 'Asset Viewer';
+  $('#collectionTitle').textContent = title;
+  document.title = collection ? `${title} · Asset Viewer` : 'Asset Viewer';
+
+  const parts = [`${state.images.length} images`, `${counts.approved} approved`, `${counts.rejected} rejected`, `${counts.unreviewed} need review`];
+  if (counts.maybe) parts.splice(2, 0, `${counts.maybe} maybe`);
+  if (state.scan?.truncated) parts.push(`scan incomplete (${state.scan.reason || 'limit'})`);
+  $('#summary').textContent = parts.join(' · ');
+
+  document.querySelectorAll('[data-workspace-tab]').forEach(button => {
+    const selected = button.dataset.workspaceTab === state.workspaceTab;
+    button.classList.toggle('active', selected);
+    button.setAttribute('aria-current', selected ? 'page' : 'false');
+  });
+  const workspace = document.querySelector('.workspace');
+  workspace?.classList.toggle('activity-mode', state.workspaceTab === 'activity');
+  workspace?.classList.toggle('approved-mode', state.workspaceTab === 'approved');
+
+  const approved = state.images.filter(asset => asset.status === 'approved');
+  const approvedMode = state.workspaceTab === 'approved' && state.view === 'gallery';
+  document.querySelector('.content-frame')?.classList.toggle('approved-mode', approvedMode);
+  $('#approvedPanel').classList.toggle('hidden', !approvedMode);
+  $('#approvedCount').textContent = `${approved.length} approved asset${approved.length === 1 ? '' : 's'}`;
+  $('#approvedSummaryText').textContent = approved.length
+    ? 'Ready to package into the existing approved-set handoff.'
+    : 'Approve assets to prepare a handoff.';
+  $('#approvedHandoff').disabled = approved.length === 0;
+  $('#approvedReport').disabled = state.images.length === 0;
+  const totalBytes = approved.reduce((total, asset) => total + Number(asset.size || 0), 0);
+  $('#approvedMeta').innerHTML = `<div><span>Collection</span><strong>${esc(title)}</strong></div><div><span>Approved</span><strong>${approved.length}</strong></div>${totalBytes ? `<div><span>Total size</span><strong>${esc(formatBytes(totalBytes))}</strong></div>` : ''}`;
+
+  if (state.workspaceTab === 'activity') $('#workspaceCount').textContent = `${state.activityEvents.length} recent events`;
+  else if (approvedMode) $('#workspaceCount').textContent = `${approved.length} approved`;
+  else $('#workspaceCount').textContent = `${state.filtered.length} shown`;
+}
+
 function renderCollections(active) {
   const select = $('#collection');
+  const nav = $('#collectionNav');
   const grouped = new Map();
   for (const collection of state.collections) {
     const group = collection.group || '';
@@ -188,14 +255,21 @@ function renderCollections(active) {
     grouped.get(group).push(collection);
   }
   const parts = [];
+  const navParts = [];
   for (const [group, rows] of grouped) {
     const options = rows.map(collection =>
       `<option value="${esc(collection.slug)}">${esc(collection.label)}${collection.available === false ? ' — unavailable' : ''}</option>`
     ).join('');
     parts.push(group ? `<optgroup label="${esc(group)}">${options}</optgroup>` : options);
+    if (group) navParts.push(`<span class="collection-group">${esc(group)}</span>`);
+    navParts.push(...rows.map(collection => `<button type="button" class="collection-link${collection.slug === active ? ' active' : ''}" data-collection="${esc(collection.slug)}"${collection.available === false ? ' disabled' : ''}><span class="collection-icon" aria-hidden="true"></span><span>${esc(collection.label)}</span>${collection.available === false ? '<small>Unavailable</small>' : ''}</button>`));
   }
   select.innerHTML = parts.join('');
+  nav.innerHTML = navParts.join('');
   if (active && state.collections.some(collection => collection.slug === active)) select.value = active;
+  nav.querySelectorAll('[data-collection]').forEach(button => {
+    button.onclick = () => switchCollection(button.dataset.collection).catch(showError);
+  });
 }
 
 function provenanceText(asset) {
@@ -246,13 +320,19 @@ function applyFilter() {
   state.filtered = rows;
   grid.innerHTML = rows.map((asset, index) => {
     const selected = state.selected.has(keyFor(asset));
+    const statusClass = asset.status || 'needs-review';
+    const technical = [
+      assetTypeLabel(asset),
+      asset.width && asset.height ? `${asset.width} × ${asset.height}` : '',
+      formatBytes(asset.size),
+    ].filter(Boolean).map(value => `<span class="tech-chip">${esc(value)}</span>`).join('');
+    const path = asset.rel && asset.rel !== asset.name ? `<div class="path">${esc(asset.rel)}</div>` : '';
     return `<article class="card ${selected ? 'selected' : ''}" data-i="${index}" tabindex="0">
-      <input class="select-toggle" data-select="${index}" type="checkbox" ${selected ? 'checked' : ''} aria-label="${selected ? 'Deselect' : 'Select'} ${esc(asset.name)}">
-      <img class="thumb" loading="lazy" src="${esc(asset.thumb)}" alt="">
-      <span class="badge ${esc(asset.status || '')}">${esc(asset.status || 'unreviewed')}</span>
+      <div class="thumb-wrap"><img class="thumb" loading="lazy" src="${esc(asset.thumb)}" alt="${esc(asset.name)}"><span class="badge ${esc(statusClass)}">${esc(statusDisplay(asset.status))}</span><input class="select-toggle" data-select="${index}" type="checkbox" ${selected ? 'checked' : ''} aria-label="${selected ? 'Deselect' : 'Select'} ${esc(asset.name)}"></div>
       <div class="caption">
         <div class="name">${esc(asset.name)}</div>
-        <div class="path">${esc(asset.rel)}</div>
+        ${path}
+        <div class="tech-row">${technical}</div>
         <div class="meta-row">${asset.is_new ? '<span class="new-dot">new</span>' : ''}${asset.comment ? '<span class="note-dot">note</span>' : ''}${asset.annotation_count ? `<span class="note-dot">${asset.annotation_count} pinned</span>` : ''}${asset.family_name ? `<span class="family-chip">${esc(asset.family_name)}</span>` : ''}${asset.family_preferred ? '<span class="preferred-chip">preferred</span>' : ''}</div>
       </div>
     </article>`;
@@ -276,6 +356,7 @@ function applyFilter() {
       toggleSelection(Number(button.dataset.select));
     };
   });
+  renderWorkspaceState();
 }
 
 function setMenu(select, placeholder, items) {
@@ -313,7 +394,7 @@ function updateCollectionActions() {
     if (review.complete) items.splice(1, 0, {value: 'reopen', label: 'Reopen review'});
     else if (!review.unreviewed) items.splice(1, 0, {value: 'complete', label: review.stale ? 'Re-complete review' : 'Mark review complete'});
   }
-  setMenu($('#actions'), 'Actions…', items);
+  setMenu($('#actions'), 'More…', items);
 }
 
 function updateBulk() {
@@ -956,6 +1037,32 @@ function closeCompare() {
   if (modal.classList.contains('hidden')) document.body.style.overflow = '';
 }
 
+function formatEventTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString([], {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'});
+}
+
+function activityAsset(event) {
+  const rel = String(event?.rel || '').trim();
+  const assetId = String(event?.asset_id || '').trim();
+  return state.images.find(asset => (rel && asset.rel === rel) || (assetId && asset.asset_id === assetId)) || null;
+}
+
+function activityPresentation(event) {
+  const action = String(event.action || '').toLowerCase();
+  const status = String(event.new_status || '').toLowerCase();
+  if ((action === 'review' || action === 'batch') && status === 'approved') return {tone: 'approved', mark: '✓', label: 'Review decision'};
+  if ((action === 'review' || action === 'batch') && status === 'rejected') return {tone: 'rejected', mark: '×', label: 'Review decision'};
+  if ((action === 'review' || action === 'batch') && status === 'maybe') return {tone: 'maybe', mark: '?', label: 'Review decision'};
+  if (action === 'asset_added' || action === 'asset_restored') return {tone: 'added', mark: '+', label: 'Collection'};
+  if (action === 'comment' || action.startsWith('annotation_')) return {tone: 'note', mark: '•', label: 'Feedback'};
+  if (action.startsWith('family_')) return {tone: 'family', mark: '◇', label: 'Variant family'};
+  if (action === 'collection_complete') return {tone: 'approved', mark: '✓', label: 'Collection'};
+  return {tone: 'neutral', mark: '•', label: action.replaceAll('_', ' ') || 'Activity'};
+}
+
 async function loadActivity() {
   if (!state.active) return;
   const response = await fetch(`/api/activity?collection=${encodeURIComponent(state.active)}&limit=200`, {cache: 'no-store'});
@@ -964,10 +1071,60 @@ async function loadActivity() {
   state.activityEvents = data.events || [];
   $('#activitySummary').textContent = `${state.activityEvents.length} recent events`;
   $('#activityList').innerHTML = state.activityEvents.length
-    ? [...state.activityEvents].reverse().map(event =>
-        `<div class="activity-event"><strong>${esc(event.summary || event.action)}</strong><span>${esc(event.created_at || '')}</span></div>`
-      ).join('')
-    : '<div class="activity-event"><span>No activity yet.</span></div>';
+    ? [...state.activityEvents].reverse().map(event => {
+        const presentation = activityPresentation(event);
+        const asset = activityAsset(event);
+        const thumbnail = asset ? `<img class="activity-thumb" src="${esc(asset.thumb)}" alt="">` : '';
+        return `<article class="activity-event ${presentation.tone}"><span class="activity-marker" aria-hidden="true">${presentation.mark}</span><div class="activity-body">${thumbnail}<div class="activity-copy"><strong>${esc(event.summary || event.action)}</strong><span>${esc(presentation.label)}</span></div></div><time datetime="${esc(event.created_at || '')}">${esc(formatEventTime(event.created_at))}</time></article>`;
+      }).join('')
+    : '<div class="activity-empty">No activity yet.</div>';
+  renderWorkspaceState();
+}
+
+async function setWorkspaceTab(tab) {
+  const next = ['gallery', 'activity', 'approved'].includes(tab) ? tab : 'gallery';
+  const previous = state.workspaceTab;
+  state.activeSavedView = '';
+
+  if (next === 'activity') {
+    if (previous === 'approved' && $('#filter').value === 'approved') {
+      $('#filter').value = state.galleryFilterBeforeApproved || 'all';
+    }
+    state.workspaceTab = 'activity';
+    state.view = 'activity';
+    renderViewMenu();
+    $('#galleryView').classList.add('hidden');
+    $('#activityView').classList.remove('hidden');
+    $('#approvedPanel').classList.add('hidden');
+    await loadActivity();
+    renderWorkspaceState();
+    return;
+  }
+
+  state.view = 'gallery';
+  state.workspaceTab = next;
+  $('#galleryView').classList.remove('hidden');
+  $('#activityView').classList.add('hidden');
+  if (next === 'approved') {
+    if (previous !== 'approved' && $('#filter').value !== 'approved') state.galleryFilterBeforeApproved = $('#filter').value || 'all';
+    $('#filter').value = 'approved';
+  } else if (previous === 'approved' && $('#filter').value === 'approved') {
+    $('#filter').value = state.galleryFilterBeforeApproved || 'all';
+  }
+  renderViewMenu();
+  applyFilter();
+  updateCollectionActions();
+  renderWorkspaceState();
+}
+
+function syncWorkspaceFromAssetControls() {
+  state.view = 'gallery';
+  state.activeSavedView = '';
+  state.workspaceTab = $('#filter').value === 'approved' ? 'approved' : 'gallery';
+  if (state.workspaceTab === 'gallery') state.galleryFilterBeforeApproved = $('#filter').value || 'all';
+  $('#galleryView').classList.remove('hidden');
+  $('#activityView').classList.add('hidden');
+  renderViewMenu();
 }
 
 async function setView(view) {
@@ -975,12 +1132,15 @@ async function setView(view) {
     applySavedView(view.slice(6));
     return;
   }
-  state.activeSavedView = '';
-  state.view = view === 'activity' ? 'activity' : 'gallery';
-  renderViewMenu();
-  $('#galleryView').classList.toggle('hidden', state.view !== 'gallery');
-  $('#activityView').classList.toggle('hidden', state.view !== 'activity');
-  if (state.view === 'activity') await loadActivity();
+  await setWorkspaceTab(view === 'activity' ? 'activity' : 'gallery');
+}
+
+async function switchCollection(slug) {
+  if (!slug || slug === state.active) return;
+  const tab = state.workspaceTab;
+  history.pushState(null, '', collectionUrl(slug));
+  await load(slug);
+  await setWorkspaceTab(tab);
 }
 
 function downloadJson(filename, payload) {
@@ -1048,8 +1208,9 @@ async function handleFamilyAction(value) {
 
 function paletteCommands() {
   const commands = [
-    {label: 'View: Gallery', run: () => setView('gallery')},
-    {label: 'View: Activity', run: () => setView('activity')},
+    {label: 'View: Gallery', run: () => setWorkspaceTab('gallery')},
+    {label: 'View: Activity', run: () => setWorkspaceTab('activity')},
+    {label: 'View: Approved', run: () => setWorkspaceTab('approved')},
     {label: 'Focus search', run: () => $('#search').focus()},
     {label: 'Save current view…', run: () => saveCurrentView()},
     {label: 'Refresh collection', run: () => load(state.active, true)},
@@ -1109,15 +1270,16 @@ function runPaletteCommand(index) {
   Promise.resolve(command.run()).catch(showError);
 }
 
-$('#collection').onchange = () => {
-  const slug = $('#collection').value;
-  history.pushState(null, '', collectionUrl(slug));
-  load(slug).then(() => setView(state.view)).catch(showError);
-};
-$('#filter').onchange = () => { clearActiveSavedView(); applyFilter(); updateCollectionActions(); };
-$('#sort').onchange = () => { clearActiveSavedView(); applyFilter(); };
-$('#search').oninput = () => { clearActiveSavedView(); applyFilter(); updateCollectionActions(); };
+$('#collection').onchange = () => switchCollection($('#collection').value).catch(showError);
+$('#filter').onchange = () => { syncWorkspaceFromAssetControls(); applyFilter(); updateCollectionActions(); };
+$('#sort').onchange = () => { if (state.workspaceTab === 'activity') syncWorkspaceFromAssetControls(); clearActiveSavedView(); applyFilter(); };
+$('#search').oninput = () => { if (state.workspaceTab === 'activity') syncWorkspaceFromAssetControls(); clearActiveSavedView(); applyFilter(); updateCollectionActions(); };
 $('#view').onchange = () => setView($('#view').value).catch(showError);
+document.querySelectorAll('[data-workspace-tab]').forEach(button => {
+  button.onclick = () => setWorkspaceTab(button.dataset.workspaceTab).catch(showError);
+});
+$('#approvedHandoff').onclick = () => exportHandoff().catch(showError);
+$('#approvedReport').onclick = () => window.open(`/report?collection=${encodeURIComponent(state.active)}&present=1&refresh=1`, '_blank', 'noopener');
 $('#actions').onchange = () => handleCollectionAction($('#actions').value).catch(showError);
 $('#selectionAction').onchange = () => handleSelectionAction($('#selectionAction').value).catch(showError);
 $('#reviewStatus').onchange = () => review($('#reviewStatus').value).catch(showError);
