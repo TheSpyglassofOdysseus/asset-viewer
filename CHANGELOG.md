@@ -4,6 +4,10 @@ All notable changes to Asset Viewer will be documented here.
 
 ## Unreleased
 
+## 0.9.1 — 2026-09-15
+
+- Stop filesystem watching from treating read-only `opened` / `closed_no_write` events as mutations, preventing Asset Viewer reconciliations from feeding back into themselves and consuming CPU while idle.
+
 ## 0.9.0 — 2026-09-15
 
 - Replace the generic six-card demo with a coherent fictional Northline Coffee summer campaign designed to demonstrate a real creative-review loop.
