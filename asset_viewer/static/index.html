@@ -8,57 +8,66 @@
   <link rel="stylesheet" href="/app.css">
 </head>
 <body>
-<header class="topbar">
-  <div class="brand"><div class="mark" aria-hidden="true">AV</div><div><strong>Asset Viewer</strong><span id="summary">Loading…</span></div></div>
-  <div class="tools">
-    <select id="collection" aria-label="Collection"></select>
-    <input id="search" type="search" placeholder="Search assets, notes, provenance…" aria-label="Search assets">
-    <select id="filter" aria-label="Review status">
-      <option value="all">All</option><option value="new">New</option><option value="unreviewed">Unreviewed</option><option value="approved">Approved</option><option value="maybe">Maybe</option><option value="rejected">Rejected</option>
-    </select>
-    <select id="sort" aria-label="Sort assets"><option value="newest">Newest</option><option value="oldest">Oldest</option><option value="name">Name</option><option value="status">Status</option><option value="size">File size</option><option value="resolution">Resolution</option></select>
-    <select id="view" aria-label="View"><option value="gallery">Gallery</option><option value="activity">Activity</option></select>
-    <select id="actions" aria-label="Collection actions"><option value="">Actions…</option></select>
-  </div>
-</header>
-<div id="bulkbar" class="bulkbar hidden"><strong id="selectedCount">0 selected</strong><select id="selectionAction" aria-label="Selected asset actions"><option value="">Selected actions…</option></select></div>
-<main>
-  <section id="galleryView"><div id="empty" class="empty hidden"><strong>No images in this view.</strong><span>Try another filter/search or register a folder with <code>asset-viewer add /path/to/images</code>.</span></div><div id="grid" class="grid"></div></section>
-  <section id="activityView" class="activity-view hidden"><div class="activity-heading"><strong>Activity</strong><span id="activitySummary"></span></div><div id="activityList" class="activity-list"></div></section>
-</main>
+<div class="app-shell">
+  <aside id="collectionRail" class="collection-rail">
+    <div class="rail-brand"><div class="mark" aria-hidden="true">AV</div><div><strong>Asset Viewer</strong><span>Local-first visual review</span></div></div>
+    <div class="rail-section-label">Collections</div>
+    <nav id="collectionNav" class="collection-nav" aria-label="Collections"></nav>
+    <div class="rail-footer"><strong>Local-first</strong><span>Original files stay where they are.</span><kbd>⌘ K</kbd><span>Command palette</span></div>
+  </aside>
 
-<div id="commandPalette" class="command-palette hidden" role="dialog" aria-modal="true" aria-label="Command palette">
-  <div class="command-box">
-    <input id="commandSearch" type="search" autocomplete="off" placeholder="Type a command…" aria-label="Command search">
-    <div id="commandList" class="command-list" role="listbox"></div>
-    <span class="command-hint">Enter to run · ↑/↓ to move · Esc to close</span>
-  </div>
+  <section class="workspace">
+    <header class="topbar">
+      <div class="mobile-brand"><div class="mark" aria-hidden="true">AV</div><strong>Asset Viewer</strong></div>
+      <div class="collection-context">
+        <span class="eyebrow">Collection</span>
+        <div class="collection-title-row"><h1 id="collectionTitle">Asset Viewer</h1><select id="actions" aria-label="Collection actions"><option value="">Actions…</option></select></div>
+        <span id="summary">Loading…</span>
+      </div>
+      <div class="search-wrap"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Search assets, notes, provenance…" aria-label="Search assets"></div>
+    </header>
+
+    <nav class="workspace-tabs" aria-label="Collection workspace">
+      <button id="tabGallery" class="workspace-tab active" type="button" data-workspace-tab="gallery">Gallery</button>
+      <button id="tabActivity" class="workspace-tab" type="button" data-workspace-tab="activity">Activity</button>
+      <button id="tabApproved" class="workspace-tab" type="button" data-workspace-tab="approved">Approved</button>
+      <span id="workspaceCount" class="workspace-count"></span>
+    </nav>
+
+    <div class="toolbar">
+      <label class="mobile-collection">Collection <select id="collection" aria-label="Collection"></select></label>
+      <select id="filter" aria-label="Review status"><option value="all">All statuses</option><option value="new">New</option><option value="unreviewed">Needs review</option><option value="approved">Approved</option><option value="maybe">Maybe</option><option value="rejected">Rejected</option></select>
+      <select id="sort" aria-label="Sort assets"><option value="newest">Sort: Newest</option><option value="oldest">Sort: Oldest</option><option value="name">Sort: Name</option><option value="status">Sort: Status</option><option value="size">Sort: File size</option><option value="resolution">Sort: Resolution</option></select>
+      <select id="view" aria-label="View and saved views"><option value="gallery">View…</option><option value="activity">Activity</option></select>
+    </div>
+
+    <div id="bulkbar" class="bulkbar hidden"><strong id="selectedCount">0 selected</strong><select id="selectionAction" aria-label="Selected asset actions"><option value="">Selected actions…</option></select></div>
+
+    <main class="workspace-main">
+      <div class="content-frame">
+        <section id="galleryView"><div id="empty" class="empty hidden"><strong>No images in this view.</strong><span>Try another filter/search or register a folder with <code>asset-viewer add /path/to/images</code>.</span></div><div id="grid" class="grid"></div></section>
+        <section id="activityView" class="activity-view hidden"><div class="activity-heading"><div><strong>Activity</strong><span>Canonical collection history</span></div><span id="activitySummary"></span></div><div id="activityList" class="activity-list"></div></section>
+        <aside id="approvedPanel" class="approved-panel hidden" aria-label="Approved asset handoff">
+          <div class="approved-ready"><span class="approved-check" aria-hidden="true">✓</span><div><strong id="approvedCount">0 approved assets</strong><span id="approvedSummaryText">Approve assets to prepare a handoff.</span></div></div>
+          <h2>Handoff</h2><p>Package the approved set for downstream use without moving or rewriting the originals.</p>
+          <button id="approvedHandoff" class="primary-action" type="button">Export approved handoff</button>
+          <button id="approvedReport" type="button">Open review report</button>
+          <div id="approvedMeta" class="approved-meta"></div>
+        </aside>
+      </div>
+    </main>
+  </section>
 </div>
+
+<div id="commandPalette" class="command-palette hidden" role="dialog" aria-modal="true" aria-label="Command palette"><div class="command-box"><input id="commandSearch" type="search" autocomplete="off" placeholder="Type a command…" aria-label="Command search"><div id="commandList" class="command-list" role="listbox"></div><span class="command-hint">Enter to run · ↑/↓ to move · Esc to close</span></div></div>
 
 <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Image review">
   <button class="icon-button close" id="close" type="button" aria-label="Close">×</button><button class="icon-button nav prev" id="prev" type="button" aria-label="Previous image">‹</button>
-  <section class="stage">
-    <div id="imageSurface" class="image-surface"><img id="full" alt=""><div id="annotationLayer" class="annotation-layer" aria-label="Spatial annotations"></div></div>
-    <div class="meta">
-      <div class="identity"><strong id="filename"></strong><span id="details"></span><span id="previewNotice" class="preview-notice hidden"></span></div>
-      <div class="review smart-controls"><span id="reviewDecision" class="review-decision">Unreviewed</span><label>Status <select id="reviewStatus" aria-label="Review status"><option value="">Unreviewed</option><option value="approved">Approved</option><option value="maybe">Maybe</option><option value="rejected">Rejected</option></select></label><select id="assetActions" aria-label="Asset actions"><option value="">Actions…</option></select></div>
-    </div>
-    <div id="familyRow" class="family-row hidden"><div><strong id="familyName"></strong><span id="familyMeta"></span></div><select id="familyActions" aria-label="Variant family actions"><option value="">Family…</option></select></div>
-    <div class="comment-row"><textarea id="comment" maxlength="10000" placeholder="Review note for the next agent…" aria-label="Review note"></textarea><span id="commentState" class="save-state">Saved automatically</span></div>
-    <details id="detailsPanel" class="details-panel"><summary>Details & provenance</summary><div id="provenanceContent" class="provenance-content"></div></details>
-    <div class="annotation-toolbar"><select id="annotationMode" aria-label="Annotation mode"><option value="">Annotation…</option><option value="point">Point</option><option value="region">Region</option></select><input id="annotationText" maxlength="4000" placeholder="Precise feedback, e.g. “move this logo left”…" aria-label="Annotation note"><span id="annotationHelp">Choose Point or Region when you need precise feedback.</span></div>
-    <div id="annotationPanel" class="annotation-panel hidden"></div>
-    <div id="historyPanel" class="history-panel hidden"></div>
-  </section>
-  <button class="icon-button nav next" id="next" type="button" aria-label="Next image">›</button>
+  <section class="stage"><div id="imageSurface" class="image-surface"><img id="full" alt=""><div id="annotationLayer" class="annotation-layer" aria-label="Spatial annotations"></div></div><div class="meta"><div class="identity"><strong id="filename"></strong><span id="details"></span><span id="previewNotice" class="preview-notice hidden"></span></div><div class="review smart-controls"><span id="reviewDecision" class="review-decision">Unreviewed</span><label>Status <select id="reviewStatus" aria-label="Review status"><option value="">Unreviewed</option><option value="approved">Approved</option><option value="maybe">Maybe</option><option value="rejected">Rejected</option></select></label><select id="assetActions" aria-label="Asset actions"><option value="">Actions…</option></select></div></div>
+    <div id="familyRow" class="family-row hidden"><div><strong id="familyName"></strong><span id="familyMeta"></span></div><select id="familyActions" aria-label="Variant family actions"><option value="">Family…</option></select></div><div class="comment-row"><textarea id="comment" maxlength="10000" placeholder="Review note for the next agent…" aria-label="Review note"></textarea><span id="commentState" class="save-state">Saved automatically</span></div><details id="detailsPanel" class="details-panel"><summary>Details & provenance</summary><div id="provenanceContent" class="provenance-content"></div></details><div class="annotation-toolbar"><select id="annotationMode" aria-label="Annotation mode"><option value="">Annotation…</option><option value="point">Point</option><option value="region">Region</option></select><input id="annotationText" maxlength="4000" placeholder="Precise feedback, e.g. “move this logo left”…" aria-label="Annotation note"><span id="annotationHelp">Choose Point or Region when you need precise feedback.</span></div><div id="annotationPanel" class="annotation-panel hidden"></div><div id="historyPanel" class="history-panel hidden"></div>
+  </section><button class="icon-button nav next" id="next" type="button" aria-label="Next image">›</button>
 </div>
 
-<div id="compareModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Compare selected assets">
-  <button class="icon-button close" id="closeCompare" type="button" aria-label="Close comparison">×</button>
-  <section class="compare-stage">
-    <div class="compare-heading"><div><strong>Compare</strong><span id="compareHint">Side by side supports up to four assets.</span></div><div class="compare-controls"><select id="compareMode" aria-label="Comparison mode"><option value="side">Side by side</option><option value="overlay">Overlay</option><option value="difference">Difference</option></select><select id="compareLink" aria-label="Zoom behavior"><option value="linked">Linked zoom</option><option value="independent">Independent zoom</option></select><select id="compareActions" aria-label="Comparison actions"><option value="">Actions…</option><option value="reset">Reset view</option></select><label id="overlayControl" class="overlay-control hidden">Blend <input id="overlayRange" type="range" min="0" max="100" value="50"></label></div></div>
-    <div id="compareGrid" class="compare-grid"></div>
-  </section>
-</div>
+<div id="compareModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Compare selected assets"><button class="icon-button close" id="closeCompare" type="button" aria-label="Close comparison">×</button><section class="compare-stage"><div class="compare-heading"><div><strong>Compare variants</strong><span id="compareHint">Side by side supports up to four assets.</span></div><div class="compare-controls"><select id="compareMode" aria-label="Comparison mode"><option value="side">Side by side</option><option value="overlay">Overlay</option><option value="difference">Difference</option></select><select id="compareLink" aria-label="Zoom behavior"><option value="linked">Linked zoom</option><option value="independent">Independent zoom</option></select><select id="compareActions" aria-label="Comparison actions"><option value="">Actions…</option><option value="reset">Reset view</option></select><label id="overlayControl" class="overlay-control hidden">Blend <input id="overlayRange" type="range" min="0" max="100" value="50"></label></div></div><div id="compareGrid" class="compare-grid"></div></section></div>
 <script src="/app.js"></script>
 </body></html>

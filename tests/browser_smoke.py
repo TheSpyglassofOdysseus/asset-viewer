@@ -136,10 +136,22 @@ def main() -> None:
                         f"{exc}; summary={summary!r}; page_errors={page_errors!r}; console_errors={console_errors!r}"
                     ) from exc
 
-                assert page.title() == "Asset Viewer"
+                assert page.title() == "Asset Viewer" or page.title().endswith("· Asset Viewer")
                 assert page.locator("#collection").input_value() == demo_slug
+                assert "Northline Coffee" in page.locator("#collectionTitle").inner_text()
+                assert page.locator("#collectionRail").is_visible()
+                assert page.locator("#tabGallery").is_visible()
+                assert page.locator("#tabActivity").is_visible()
+                assert page.locator("#tabApproved").is_visible()
+                assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
                 summary = (page.locator("#summary").text_content() or "").strip()
                 assert summary and summary.lower() != "loading…", summary
+
+                page.locator("#tabApproved").click()
+                wait_until("one seeded approved asset", lambda: page.locator("#grid .card").count() == 1)
+                assert page.locator("#approvedPanel").is_visible()
+                page.locator("#tabGallery").click()
+                wait_until("gallery restored", lambda: page.locator("#grid .card").count() == 6)
 
                 target_card = page.locator("#grid .card").filter(has_text="06-homepage-banner.png")
                 assert target_card.count() == 1, "expected exactly one unreviewed demo banner card"
@@ -170,12 +182,24 @@ def main() -> None:
                 page.locator("#close").click()
                 page.locator("#modal").wait_for(state="hidden")
 
+                page.locator("#tabApproved").click()
+                wait_until("new approval appears in Approved", lambda: page.locator("#grid .card").count() == 2)
+                assert page.locator("#approvedPanel").is_visible()
+
                 page.locator("#view").select_option("activity")
                 page.locator("#activityView").wait_for(state="visible")
                 wait_until(
                     "review event to appear in Activity",
                     lambda: page.locator("#activityList .activity-event").count() > 0,
                 )
+
+                page.set_viewport_size({"width": 390, "height": 844})
+                page.locator("#tabGallery").click()
+                wait_until("full mobile gallery restored after Approved and Activity", lambda: page.locator("#grid .card").count() == 6)
+                assert page.locator("#filter").input_value() == "all"
+                assert not page.locator("#collectionRail").is_visible()
+                assert page.locator(".mobile-collection").is_visible()
+                assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
 
                 assert not page_errors, f"browser page errors: {page_errors}"
                 assert not console_errors, f"browser console errors: {console_errors}"

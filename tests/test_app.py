@@ -61,6 +61,22 @@ class AppTests(unittest.TestCase):
         self.assertIn("event.ctrlKey || event.metaKey", script)
         self.assertIn("event.key.toLowerCase() === 'k'", script)
 
+    def test_visual_redesign_projects_real_workflow_without_mockup_only_features(self):
+        root = Path(__file__).parents[1] / "asset_viewer" / "static"
+        html = (root / "index.html").read_text()
+        script = (root / "app.js").read_text()
+        css = (root / "app.css").read_text()
+        for control_id in ("collectionRail", "collectionNav", "collectionTitle", "tabGallery", "tabActivity", "tabApproved", "approvedPanel"):
+            self.assertIn(f'id="{control_id}"', html)
+        for mockup_only_copy in ("Trash", "Local Storage", "Add Assets"):
+            self.assertNotIn(mockup_only_copy, html)
+        self.assertIn("function renderWorkspaceState()", script)
+        self.assertIn("function setWorkspaceTab(tab)", script)
+        self.assertIn("$('#filter').value = 'approved';", script)
+        self.assertIn("object-fit:contain", css)
+        self.assertIn(".collection-rail", css)
+        self.assertIn(".content-frame.approved-mode", css)
+
     def test_comment_autosave_captures_asset_identity(self):
         script = (Path(__file__).parents[1] / "asset_viewer" / "static" / "app.js").read_text()
         self.assertIn("const assetKey = keyFor(asset);", script)

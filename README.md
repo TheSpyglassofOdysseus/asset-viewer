@@ -8,21 +8,36 @@ Asset Viewer gives humans a clean place to **see, compare, approve, defer, and r
 
 It was built for a simple workflow problem: agents and creative tools are increasingly good at producing images, but the review step often degenerates into oversized chat attachments, IDE file trees, temporary uploads, or copies scattered across cloud drives. Asset Viewer keeps review separate from storage.
 
-### Compare the attempts, not chat attachments
+### Review the work, not the file tree
 
-Group related generations into a variant family and compare them side by side with linked zoom/pan, overlay, or difference views. Review state and notes stay attached to the exact assets.
-
-![Actual Asset Viewer side-by-side comparison of two Northline Coffee demo variants](docs/precision-review.png)
-
-*Actual Asset Viewer UI. The built-in demo seeds a fictional Northline Coffee campaign so the review workflow is visible immediately after install.*
-
-### Review a realistic batch
-
-The demo includes a product-first hero, a lifestyle alternative, an intentionally bad crop, a product lineup, a lifestyle concept, and a homepage banner. It arrives with a few example decisions and two assets still waiting for review, so a new user sees the real approve / maybe / reject loop instead of generic placeholder rectangles.
+Open a collection and the review state is immediately visible: what needs attention, what is approved, what is rejected, and which assets belong to the same variant family. The original project folders stay exactly where they are.
 
 ![Actual Asset Viewer gallery showing the Northline Coffee demo review queue](docs/screenshot.png)
 
-From there the same decisions are available to humans and automation through the Activity view, CLI, JSON API, approved-set handoff, and optional MCP adapter.
+*Actual Asset Viewer UI. The built-in demo seeds a fictional Northline Coffee campaign so the complete workflow is visible immediately after install.*
+
+### Compare variants where the pixels matter
+
+Group related generations into a variant family and inspect them side by side with linked zoom/pan, overlay, or difference views. Review notes and preferred-variant state remain attached to the exact assets instead of disappearing into a chat transcript.
+
+![Actual Asset Viewer side-by-side comparison of two Northline Coffee demo variants](docs/precision-review.png)
+
+### Follow the decision trail, then hand off the approved set
+
+Activity is a human-readable projection of the same durable event stream automation consumes. The Approved workspace is a focused lens over canonical review state, with the existing integrity-checked handoff and review report ready for downstream use.
+
+<table>
+<tr>
+<td width="50%"><img src="docs/activity-review.png" alt="Actual Asset Viewer activity timeline for the Northline Coffee demo"></td>
+<td width="50%"><img src="docs/approved-handoff.png" alt="Actual Asset Viewer approved-set handoff workspace for the Northline Coffee demo"></td>
+</tr>
+<tr>
+<td><em>Real collection activity and review decisions.</em></td>
+<td><em>Real approved assets and existing handoff controls.</em></td>
+</tr>
+</table>
+
+The demo includes a product-first hero, a lifestyle alternative, an intentionally bad crop, a product lineup, a lifestyle concept, and a homepage banner. It arrives with a few example decisions and two assets still waiting for review, so a new user can exercise the real review loop instead of staring at placeholder rectangles.
 
 ## Why it exists
 
