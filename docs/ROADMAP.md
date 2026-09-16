@@ -69,13 +69,15 @@ asset-viewer export-manifest      # implemented
 asset-viewer asset-url             # implemented
 ```
 
-Ordered review events are implemented with stable asset IDs. Family lifecycle/preferred-member changes join that feed, and the optional MCP adapter exposes the same protocol directly to agents without changing the core database contract. A future webhook adapter can translate those events into push workflows when needed.
+Ordered review events are implemented with stable asset IDs. Family lifecycle/preferred-member changes join that feed, the optional MCP adapter exposes the same protocol directly to agents without changing the core database contract, and v0.9 adds a durable signed webhook adapter with per-endpoint cursors for push workflows.
 
 The intended loop is:
 
 **Generate → register/publish folder → notify human → review → consume feedback → regenerate.**
 
-- [x] Optional MCP v2 adapter over collections, reviews, pending state, events, annotations, families, stable URLs, and refresh.
+- [x] Optional MCP v2 adapter over collections, reviews, pending state, events, annotations, families, stable URLs, refresh, and project sync.
+- [x] Project-owned `.asset-viewer.toml` registration plus sidecar/PNG metadata adapters.
+- [x] Durable outbound webhook delivery with signed payloads and replay-safe cursors.
 
 ## P3 — serious creative review
 

@@ -49,6 +49,18 @@ class AppTests(unittest.TestCase):
         self.assertIn("function handleAssetAction(value)", js)
         self.assertIn("function renderReviewDecision(asset)", js)
 
+    def test_v09_saved_views_and_command_palette_remain_progressive_disclosure(self):
+        html = (Path(__file__).parents[1] / "asset_viewer" / "static" / "index.html").read_text()
+        script = (Path(__file__).parents[1] / "asset_viewer" / "static" / "app.js").read_text()
+        self.assertIn('id="commandPalette" class="command-palette hidden"', html)
+        self.assertNotIn('id="commandPaletteButton"', html)
+        self.assertIn("SAVED_VIEWS_KEY", script)
+        self.assertIn("function renderViewMenu()", script)
+        self.assertIn("Saved views", script)
+        self.assertIn("function openCommandPalette()", script)
+        self.assertIn("event.ctrlKey || event.metaKey", script)
+        self.assertIn("event.key.toLowerCase() === 'k'", script)
+
     def test_comment_autosave_captures_asset_identity(self):
         script = (Path(__file__).parents[1] / "asset_viewer" / "static" / "app.js").read_text()
         self.assertIn("const assetKey = keyFor(asset);", script)

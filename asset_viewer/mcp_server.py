@@ -6,6 +6,8 @@ from typing import Any
 from .app import capability_document, scan_collection
 from .activity import activity_feed
 from .handoff import approved_handoff
+from .project_config import load_project_config
+from .project_sync import sync_project
 from .visual_context import (
     VISUAL_PANEL_URI,
     get_visual_context as build_visual_context,
@@ -149,6 +151,16 @@ def get_approved_handoff(collection: str) -> dict[str, Any]:
     return approved_handoff(collection)
 
 
+def inspect_project_config(path: str = ".") -> dict[str, Any]:
+    """Inspect the nearest project-owned .asset-viewer.toml without changing viewer state."""
+    return load_project_config(path)
+
+
+def sync_project_config(path: str = ".", dry_run: bool = True) -> dict[str, Any]:
+    """Register project-declared review folders and import metadata; dry-run is the safe default."""
+    return sync_project(path, dry_run=dry_run)
+
+
 def refresh_collections(collection: str | None = None) -> dict[str, Any]:
     """Run the normal bounded filesystem reconciliation and return catalog state."""
     _scan(collection)
@@ -220,6 +232,8 @@ def create_mcp_server():
     server.tool()(get_provenance)
     server.tool()(set_provenance)
     server.tool()(get_approved_handoff)
+    server.tool()(inspect_project_config)
+    server.tool()(sync_project_config)
     server.tool()(refresh_collections)
     server.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))(get_visual_context)
     server.tool(

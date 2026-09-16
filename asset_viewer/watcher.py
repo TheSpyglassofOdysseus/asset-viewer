@@ -27,6 +27,14 @@ class _CollectionEventHandler(FileSystemEventHandler):
         self.notify = notify
 
     def on_any_event(self, event: FileSystemEvent) -> None:
+        # watchdog also emits read-only lifecycle events (notably ``opened``
+        # and ``closed_no_write`` on Linux). Reconciliation reads image files,
+        # so treating those as mutations creates a self-sustaining scan loop.
+        # Only events that can change filesystem state should invalidate the
+        # catalog. ``closed`` is the post-write close event; read-only closes
+        # are reported separately as ``closed_no_write``.
+        if event.event_type not in {"created", "modified", "moved", "deleted", "closed"}:
+            return
         if event.is_directory:
             # Directory moves/removals can change many assets at once.
             if event.event_type in {"moved", "deleted"}:

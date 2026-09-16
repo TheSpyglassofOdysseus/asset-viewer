@@ -106,7 +106,8 @@ def main() -> None:
             # Prove the documented demo -> serve path populates the catalog on
             # the first normal gallery request before exercising the browser UI.
             gallery = get_json(f"{base_url}/api/gallery")
-            assert gallery.get("active") == "asset-viewer-demo", gallery
+            demo_slug = str(gallery.get("active") or "")
+            assert demo_slug.startswith("northline-coffee-summer-launch"), gallery
             assert len(gallery.get("images") or []) == 6, gallery
             assert not (gallery.get("scan") or {}).get("truncated"), gallery.get("scan")
 
@@ -136,13 +137,15 @@ def main() -> None:
                     ) from exc
 
                 assert page.title() == "Asset Viewer"
-                assert page.locator("#collection").input_value() == "asset-viewer-demo"
+                assert page.locator("#collection").input_value() == demo_slug
                 summary = (page.locator("#summary").text_content() or "").strip()
                 assert summary and summary.lower() != "loading…", summary
 
-                page.locator("#grid .card").first.click()
+                target_card = page.locator("#grid .card").filter(has_text="06-homepage-banner.png")
+                assert target_card.count() == 1, "expected exactly one unreviewed demo banner card"
+                target_card.click()
                 page.locator("#modal").wait_for(state="visible")
-                assert page.locator("#filename").inner_text().strip()
+                assert page.locator("#filename").inner_text().strip() == "06-homepage-banner.png"
 
                 with page.expect_response(
                     lambda response: urllib.parse.urlsplit(response.url).path == "/api/review"
@@ -157,9 +160,12 @@ def main() -> None:
                     lambda: page.locator("#reviewStatus").input_value() == "approved",
                 )
 
-                reviews = get_json(f"{base_url}/api/reviews?collection=asset-viewer-demo&present=1")
-                approved = [item for item in reviews.get("items", []) if item.get("status") == "approved"]
-                assert len(approved) == 1, reviews
+                reviews = get_json(f"{base_url}/api/reviews?collection={demo_slug}&present=1")
+                banner_review = next(
+                    (item for item in reviews.get("items", []) if item.get("rel") == "06-homepage-banner.png"),
+                    None,
+                )
+                assert banner_review and banner_review.get("status") == "approved", reviews
 
                 page.locator("#close").click()
                 page.locator("#modal").wait_for(state="hidden")
