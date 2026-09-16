@@ -8,6 +8,14 @@ from .activity import activity_feed
 from .handoff import approved_handoff
 from .project_config import load_project_config
 from .project_sync import sync_project
+from .visual_context import (
+    VISUAL_PANEL_URI,
+    get_visual_context as build_visual_context,
+    panel_preview_meta,
+    record_visual_review as persist_visual_review,
+    visual_decision_panel_html,
+    visual_panel_resource_meta,
+)
 from .storage import (
     annotations_for_asset,
     asset_metadata,
@@ -162,9 +170,52 @@ def refresh_collections(collection: str | None = None) -> dict[str, Any]:
     return {"version": 1, "collections": [catalog_state(row["slug"]) for row in rows]}
 
 
+def get_visual_context(
+    collection: str,
+    surface: str,
+    viewport: str = "",
+    candidate: str = "",
+    base_url: str = "",
+    refresh: bool = False,
+) -> dict[str, Any]:
+    """Read bounded visual decision memory for one product surface without changing review state."""
+    if refresh:
+        _scan(collection)
+    return build_visual_context(collection, surface, viewport, candidate, base_url)
+
+
+def render_visual_decision_panel(context: dict[str, Any]):
+    """Render context returned by get_visual_context. Call get_visual_context first and pass its result unchanged."""
+    if not isinstance(context, dict) or not isinstance(context.get("candidate"), dict):
+        raise ValueError("context must be a get_visual_context result with a candidate")
+    if int((context.get("render_contract") or {}).get("max_primary_images") or 0) > 2:
+        raise ValueError("visual panel supports at most two primary images")
+    try:
+        from mcp.types import CallToolResult, TextContent
+    except ImportError as exc:  # pragma: no cover - optional MCP integration
+        raise RuntimeError('MCP support requires: pip install "local-asset-viewer[mcp]"') from exc
+    return CallToolResult(
+        structuredContent=context,
+        content=[TextContent(type="text", text="Visual decision panel ready.")],
+        _meta=panel_preview_meta(context),
+    )
+
+
+def record_visual_review(
+    collection: str,
+    asset: str,
+    status: str,
+    comment: str | None = None,
+    explicit_human_action: bool = False,
+) -> dict[str, Any]:
+    """Record a review only after the human explicitly chooses Approve, Maybe, or Reject in this turn."""
+    return persist_visual_review(collection, asset, status, comment, explicit_human_action)
+
+
 def create_mcp_server():
     try:
         from mcp.server import MCPServer
+        from mcp.types import ToolAnnotations
     except ImportError as exc:  # pragma: no cover - exercised by CLI integration
         raise RuntimeError('MCP support requires: pip install "local-asset-viewer[mcp]"') from exc
 
@@ -184,6 +235,37 @@ def create_mcp_server():
     server.tool()(inspect_project_config)
     server.tool()(sync_project_config)
     server.tool()(refresh_collections)
+    server.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))(get_visual_context)
+    server.tool(
+        annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False),
+        meta={
+            "ui": {"resourceUri": VISUAL_PANEL_URI},
+            "openai/toolInvocation/invoking": "Loading visual review…",
+            "openai/toolInvocation/invoked": "Visual review ready.",
+            "openai/outputTemplate": VISUAL_PANEL_URI,
+        }
+    )(render_visual_decision_panel)
+    server.tool(
+        description=(
+            "Persist one Asset Viewer review decision. Use only when the human explicitly chose "
+            "Approve, Maybe, or Reject in the current turn or via the Visual Decision Panel. "
+            "This changes durable review state and appends review history."
+        ),
+        annotations=ToolAnnotations(
+            readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False
+        ),
+    )(record_visual_review)
+
+    @server.resource(
+        VISUAL_PANEL_URI,
+        name="visual-decision-panel",
+        title="Visual Decision Panel",
+        description="Focused candidate/reference review with durable Asset Viewer decisions.",
+        mime_type="text/html;profile=mcp-app",
+        meta=visual_panel_resource_meta(),
+    )
+    def visual_decision_panel_resource() -> str:
+        return visual_decision_panel_html()
 
     @server.resource("asset-viewer://capabilities")
     def capabilities_resource() -> str:
