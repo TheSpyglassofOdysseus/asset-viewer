@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
+import shutil
+import subprocess
 import warnings
 from contextlib import suppress
 from pathlib import Path
@@ -79,6 +82,98 @@ def render_preview_worker(
                 pass
         sender.send({"ok": True, "width": original_size[0], "height": original_size[1]})
     except BaseException as exc:  # Child boundary: serialize failure, never leak it across the process boundary.
+        with suppress(Exception):
+            sender.send({"ok": False, "error": f"{type(exc).__name__}: {exc}"[:500]})
+    finally:
+        with suppress(Exception):
+            sender.close()
+
+
+
+def render_video_poster_worker(
+    source_text: str,
+    destination_text: str,
+    max_size: tuple[int, int],
+    max_source_bytes: int,
+    memory_bytes: int,
+    sender: Any,
+) -> None:
+    """Extract one representative JPEG poster frame from a video in an isolated process."""
+    try:
+        _apply_resource_limits(memory_bytes)
+        source = Path(source_text)
+        destination = Path(destination_text)
+        stat = source.stat()
+        if stat.st_size > max_source_bytes:
+            raise ValueError("video exceeds configured preview byte limit")
+
+        ffmpeg = shutil.which("ffmpeg")
+        ffprobe = shutil.which("ffprobe")
+        if not ffmpeg or not ffprobe:
+            raise RuntimeError("ffmpeg/ffprobe are required for video posters")
+
+        probe = subprocess.run(
+            [
+                ffprobe,
+                "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=width,height:format=duration",
+                "-of", "json",
+                str(source),
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=10,
+        )
+        metadata = json.loads(probe.stdout or "{}")
+        streams = metadata.get("streams") or []
+        stream = streams[0] if streams else {}
+        width = int(stream.get("width") or 0)
+        height = int(stream.get("height") or 0)
+        duration = float((metadata.get("format") or {}).get("duration") or 0)
+        seek = 0.0
+        if duration > 0.4:
+            seek = min(max(duration * 0.25, 0.1), max(duration - 0.1, 0.1))
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_name(f".{destination.stem}.{os.getpid()}.tmp.jpg")
+        max_w, max_h = max_size
+        filter_graph = (
+            f"scale={max_w}:{max_h}:force_original_aspect_ratio=decrease,"
+            "pad=ceil(iw/2)*2:ceil(ih/2)*2"
+        )
+        try:
+            subprocess.run(
+                [
+                    ffmpeg,
+                    "-hide_banner",
+                    "-loglevel", "error",
+                    "-threads", "1",
+                    "-ss", f"{seek:.3f}",
+                    "-i", str(source),
+                    "-frames:v", "1",
+                    "-vf", filter_graph,
+                    "-threads", "1",
+                    "-q:v", "3",
+                    "-y",
+                    str(temporary),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=20,
+            )
+            if not temporary.is_file() or temporary.stat().st_size == 0:
+                raise RuntimeError("ffmpeg did not produce a poster frame")
+            os.replace(temporary, destination)
+        finally:
+            with suppress(OSError):
+                temporary.unlink(missing_ok=True)
+
+        sender.send({"ok": True, "width": width, "height": height, "duration": duration})
+    except BaseException as exc:
         with suppress(Exception):
             sender.send({"ok": False, "error": f"{type(exc).__name__}: {exc}"[:500]})
     finally:

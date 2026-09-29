@@ -2,9 +2,9 @@
 
 [![CI](https://github.com/TheSpyglassofOdysseus/asset-viewer/actions/workflows/ci.yml/badge.svg)](https://github.com/TheSpyglassofOdysseus/asset-viewer/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE) [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB.svg)](https://www.python.org/)
 
-> A local-first visual review gallery for AI-generated images and project asset folders.
+> A local-first visual review gallery for AI-generated images, videos, and project asset folders.
 
-Asset Viewer gives humans a clean place to **see, compare, approve, defer, and reject image assets without moving the originals**.
+Asset Viewer gives humans a clean place to **see, compare, play, approve, defer, and reject visual assets without moving the originals**.
 
 It was built for a simple workflow problem: agents and creative tools are increasingly good at producing images, but the review step often degenerates into oversized chat attachments, IDE file trees, temporary uploads, or copies scattered across cloud drives. Asset Viewer keeps review separate from storage.
 
@@ -53,7 +53,8 @@ No import job. No duplicate asset library. No requirement to upload the batch to
 ## Features
 
 - **Register existing folders in place** — originals never need to move.
-- **Fast thumbnail grid** with lazy loading and disk-cached previews.
+- **Fast thumbnail grid** with lazy loading and disk-cached previews, including FFmpeg-extracted poster frames for local videos.
+- **Native video review** for MP4, WebM, MOV, and M4V files; originals stay in place and play directly in the focused review modal.
 - **Full-screen carousel** using bounded review-size previews; full-resolution originals load only on explicit request.
 - **Approve / Maybe / Reject** states stored separately from source files.
 - **Review notes/comments plus pinned point/region annotations** attached to the exact asset without modifying it; spatial feedback is content-fingerprinted and becomes stale if the underlying pixels change.

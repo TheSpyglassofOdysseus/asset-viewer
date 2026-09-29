@@ -4,6 +4,10 @@ All notable changes to Asset Viewer will be documented here.
 
 ## Unreleased
 
+- Add first-class local video assets (`.mp4`, `.webm`, `.mov`, `.m4v`) without copying or transcoding originals.
+- Generate bounded, cached JPEG poster frames with FFmpeg for fast video thumbnails while native browser playback streams the original file in place.
+- Keep video poster extraction single-threaded inside the existing isolated preview boundary to control memory and CPU use.
+
 - Redesign the browser UI around the real review workflow with a light studio shell, persistent desktop collection rail, collection context, and first-class Gallery / Activity / Approved navigation.
 - Increase gallery image prominence while preserving uncropped `object-fit: contain` review semantics, and strengthen decision/family metadata hierarchy without changing source ownership or canonical review state.
 - Add an Approved workspace backed by the existing approved review filter and integrity-checked handoff/report flows; no second approval store or export model is introduced.

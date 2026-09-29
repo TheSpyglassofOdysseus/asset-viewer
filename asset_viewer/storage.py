@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any, Iterable
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif", ".bmp", ".svg"}
+VIDEO_EXTS = {".mp4", ".webm", ".mov", ".m4v"}
+ASSET_EXTS = IMAGE_EXTS | VIDEO_EXTS
 VALID_STATUSES = {"", "approved", "maybe", "rejected"}
 _WRITE_LOCK = threading.RLock()
 _DB_INIT_LOCK = threading.RLock()
@@ -531,7 +533,7 @@ def safe_file(slug: str, relative: str) -> Path | None:
         relative_path = Path(relative)
         if relative_path.is_absolute() or any(part in {"", ".", ".."} for part in relative_path.parts):
             return None
-        if relative_path.suffix.lower() not in IMAGE_EXTS:
+        if relative_path.suffix.lower() not in ASSET_EXTS:
             return None
         path = (root / relative_path).resolve()
         if path == root or root not in path.parents or not path.is_file():

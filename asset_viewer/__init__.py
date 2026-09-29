@@ -1,2 +1,2 @@
-"""Asset Viewer: local-first visual review for image folders."""
-__version__ = "0.9.1"
+"""Asset Viewer: local-first visual review for project asset folders."""
+__version__ = "0.10.0"

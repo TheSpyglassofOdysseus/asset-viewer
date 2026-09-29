@@ -9,7 +9,7 @@ from typing import Callable
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
-from .storage import IMAGE_EXTS, collections
+from .storage import ASSET_EXTS, collections
 
 LOGGER = logging.getLogger("asset_viewer.watcher")
 ScanCallback = Callable[[str, bool], object]
@@ -18,7 +18,7 @@ ScanCallback = Callable[[str, bool], object]
 def _is_relevant(path: str | None) -> bool:
     if not path:
         return False
-    return Path(path).suffix.lower() in IMAGE_EXTS
+    return Path(path).suffix.lower() in ASSET_EXTS
 
 
 class _CollectionEventHandler(FileSystemEventHandler):

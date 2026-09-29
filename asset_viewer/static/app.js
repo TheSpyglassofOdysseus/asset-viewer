@@ -213,7 +213,7 @@ function renderWorkspaceState() {
   $('#collectionTitle').textContent = title;
   document.title = collection ? `${title} · Asset Viewer` : 'Asset Viewer';
 
-  const parts = [`${state.images.length} images`, `${counts.approved} approved`, `${counts.rejected} rejected`, `${counts.unreviewed} need review`];
+  const parts = [`${state.images.length} assets`, `${counts.approved} approved`, `${counts.rejected} rejected`, `${counts.unreviewed} need review`];
   if (counts.maybe) parts.splice(2, 0, `${counts.maybe} maybe`);
   if (state.scan?.truncated) parts.push(`scan incomplete (${state.scan.reason || 'limit'})`);
   $('#summary').textContent = parts.join(' · ');
@@ -328,7 +328,7 @@ function applyFilter() {
     ].filter(Boolean).map(value => `<span class="tech-chip">${esc(value)}</span>`).join('');
     const path = asset.rel && asset.rel !== asset.name ? `<div class="path">${esc(asset.rel)}</div>` : '';
     return `<article class="card ${selected ? 'selected' : ''}" data-i="${index}" tabindex="0">
-      <div class="thumb-wrap"><img class="thumb" loading="lazy" src="${esc(asset.thumb)}" alt="${esc(asset.name)}"><span class="badge ${esc(statusClass)}">${esc(statusDisplay(asset.status))}</span><input class="select-toggle" data-select="${index}" type="checkbox" ${selected ? 'checked' : ''} aria-label="${selected ? 'Deselect' : 'Select'} ${esc(asset.name)}"></div>
+      <div class="thumb-wrap"><img class="thumb" loading="lazy" src="${esc(asset.thumb)}" alt="${esc(asset.name)}">${asset.media_type === 'video' ? '<span class="video-play" aria-hidden="true">▶</span>' : ''}<span class="badge ${esc(statusClass)}">${esc(statusDisplay(asset.status))}</span><input class="select-toggle" data-select="${index}" type="checkbox" ${selected ? 'checked' : ''} aria-label="${selected ? 'Deselect' : 'Select'} ${esc(asset.name)}"></div>
       <div class="caption">
         <div class="name">${esc(asset.name)}</div>
         ${path}
@@ -491,10 +491,30 @@ function openAt(index, updateUrl = true) {
   if (!state.filtered.length) return;
   state.current = (index + state.filtered.length) % state.filtered.length;
   const asset = state.filtered[state.current];
-  $('#full').src = assetSrc(asset);
-  $('#full').alt = asset.name;
+  const isVideo = asset.media_type === 'video';
+  const full = $('#full');
+  const video = $('#videoFull');
+  full.classList.toggle('hidden', isVideo);
+  video.classList.toggle('hidden', !isVideo);
+  if (isVideo) {
+    full.src = '';
+    full.alt = '';
+    video.poster = asset.preview || asset.thumb;
+    video.src = asset.file;
+    video.setAttribute('aria-label', asset.name);
+    video.load();
+  } else {
+    video.pause();
+    video.removeAttribute('src');
+    video.removeAttribute('poster');
+    video.load();
+    full.src = assetSrc(asset);
+    full.alt = asset.name;
+  }
   $('#filename').textContent = asset.name;
-  $('#details').textContent = `${asset.rel} · ${asset.width || '?'}×${asset.height || '?'} · ${formatBytes(asset.size)}`;
+  const resolution = asset.width && asset.height ? `${asset.width}×${asset.height}` : (isVideo ? 'video' : '?×?');
+  $('#details').textContent = `${asset.rel} · ${resolution} · ${formatBytes(asset.size)}`;
+  document.querySelector('.annotation-toolbar')?.classList.toggle('hidden', isVideo);
   $('#comment').value = asset.comment || '';
   $('#commentState').textContent = 'Saved';
   renderReviewDecision(asset);
@@ -519,6 +539,11 @@ function openAt(index, updateUrl = true) {
 function close() {
   modal.classList.add('hidden');
   $('#full').src = '';
+  const video = $('#videoFull');
+  video.pause();
+  video.removeAttribute('src');
+  video.removeAttribute('poster');
+  video.load();
   state.annotations = [];
   cancelAnnotationMode();
   renderAnnotations();

@@ -22,11 +22,13 @@ from typing import Any
 from PIL import Image, ImageDraw
 
 from . import __version__
-from .preview_worker import inspect_images_worker, render_preview_worker
+from .preview_worker import inspect_images_worker, render_preview_worker, render_video_poster_worker
 from .activity import activity_feed
 from .handoff import approved_handoff
 from .storage import (
+    ASSET_EXTS,
     IMAGE_EXTS,
+    VIDEO_EXTS,
     asset_rel,
     asset_metadata,
     set_asset_metadata,
@@ -82,6 +84,7 @@ MAX_SCAN_FILES = _env_int("ASSET_VIEWER_MAX_SCAN_FILES", 50_000)
 MAX_SCAN_SECONDS = _env_int("ASSET_VIEWER_MAX_SCAN_SECONDS", 10)
 SCAN_TTL_SECONDS = _env_int("ASSET_VIEWER_SCAN_TTL_SECONDS", 60)
 MAX_THUMBNAIL_SOURCE_BYTES = _env_int("ASSET_VIEWER_MAX_THUMBNAIL_BYTES", 250 * 1024 * 1024)
+MAX_VIDEO_PREVIEW_SOURCE_BYTES = _env_int("ASSET_VIEWER_MAX_VIDEO_PREVIEW_BYTES", 2 * 1024 * 1024 * 1024)
 MAX_IMAGE_PIXELS = _env_int("ASSET_VIEWER_MAX_IMAGE_PIXELS", 50_000_000)
 MAX_THUMBNAIL_CONCURRENCY = _env_int("ASSET_VIEWER_THUMBNAIL_WORKERS", 2)
 PREVIEW_PROCESS_TIMEOUT_SECONDS = _env_int("ASSET_VIEWER_PREVIEW_TIMEOUT_SECONDS", 15)
@@ -136,12 +139,15 @@ def capability_document() -> dict[str, Any]:
             "approved_handoff": True,
             "collection_groups": True,
             "smart_action_menus": True,
+            "video_assets": True,
+            "video_poster_thumbnails": True,
         },
         "limits": {
             "max_scan_files": MAX_SCAN_FILES,
             "max_scan_seconds": MAX_SCAN_SECONDS,
             "scan_ttl_seconds": SCAN_TTL_SECONDS,
             "max_thumbnail_source_bytes": MAX_THUMBNAIL_SOURCE_BYTES,
+            "max_video_preview_source_bytes": MAX_VIDEO_PREVIEW_SOURCE_BYTES,
             "max_image_pixels": MAX_IMAGE_PIXELS,
             "thumbnail_concurrency": MAX_THUMBNAIL_CONCURRENCY,
             "preview_process_timeout_seconds": PREVIEW_PROCESS_TIMEOUT_SECONDS,
@@ -253,11 +259,13 @@ def _gallery_rows(slug: str, records: list[dict[str, Any]]) -> list[dict[str, An
         rel = record["rel"]
         quoted = urllib.parse.quote(rel, safe="/")
         mtime_ns = int(record.get("mtime_ns") or 0)
+        media_type = "video" if Path(rel).suffix.lower() in VIDEO_EXTS else "image"
         rows.append({
             "asset_id": record.get("asset_id"),
             "collection": slug,
             "name": Path(rel).name,
             "rel": rel,
+            "media_type": media_type,
             "size": int(record.get("size") or 0),
             "mtime": mtime_ns / 1_000_000_000 if mtime_ns else 0,
             "width": int(record.get("width") or 0),
@@ -320,7 +328,7 @@ def scan_collection(slug: str, force: bool = False) -> tuple[list[dict[str, Any]
                     break
                 path = Path(directory) / filename
                 try:
-                    if path.suffix.lower() not in IMAGE_EXTS:
+                    if path.suffix.lower() not in ASSET_EXTS:
                         continue
                     resolved = path.resolve(strict=True)
                     if resolved == root or root not in resolved.parents or not resolved.is_file():
@@ -347,7 +355,8 @@ def scan_collection(slug: str, force: bool = False) -> tuple[list[dict[str, Any]
                             annotation_hash_mismatch = bool(expected_annotation and observed_hash != expected_annotation)
                     else:
                         width, height, preview_error = 0, 0, None
-                        pending_metadata.append(resolved)
+                        if path.suffix.lower() in IMAGE_EXTS:
+                            pending_metadata.append(resolved)
                     discoveries.append({
                         "rel": rel,
                         "device": int(stat.st_dev),
@@ -383,7 +392,7 @@ def scan_collection(slug: str, force: bool = False) -> tuple[list[dict[str, Any]
     state = reconcile_catalog(slug, discoveries, truncated=truncated, reason=reason, elapsed_ms=elapsed_ms)
     rows = _gallery_rows(slug, catalog_records(slug, present_only=True))
     if truncated:
-        LOGGER.warning("collection scan truncated slug=%s reason=%s images=%s elapsed_ms=%s", slug, reason, len(rows), elapsed_ms)
+        LOGGER.warning("collection scan truncated slug=%s reason=%s assets=%s elapsed_ms=%s", slug, reason, len(rows), elapsed_ms)
     return rows, state | {"cached": False}
 
 
@@ -439,14 +448,21 @@ def _render_preview(path: Path, destination: Path, max_size: tuple[int, int]) ->
     with THUMBNAIL_SEMAPHORE:
         if destination.exists():
             return destination.read_bytes()
-        # Source-byte validation belongs inside the disposable decoder worker.
+        # Source-byte validation belongs inside the disposable preview worker.
         # Avoid a second parent-process filesystem touch after safe_file() has
         # already established collection containment.
-        payload = _run_isolated_worker(
-            render_preview_worker,
-            (str(path), str(destination), max_size, MAX_THUMBNAIL_SOURCE_BYTES, MAX_IMAGE_PIXELS, PREVIEW_WORKER_MEMORY_BYTES),
-            PREVIEW_PROCESS_TIMEOUT_SECONDS,
-        )
+        if path.suffix.lower() in VIDEO_EXTS:
+            payload = _run_isolated_worker(
+                render_video_poster_worker,
+                (str(path), str(destination), max_size, MAX_VIDEO_PREVIEW_SOURCE_BYTES, PREVIEW_WORKER_MEMORY_BYTES),
+                max(PREVIEW_PROCESS_TIMEOUT_SECONDS, 25),
+            )
+        else:
+            payload = _run_isolated_worker(
+                render_preview_worker,
+                (str(path), str(destination), max_size, MAX_THUMBNAIL_SOURCE_BYTES, MAX_IMAGE_PIXELS, PREVIEW_WORKER_MEMORY_BYTES),
+                PREVIEW_PROCESS_TIMEOUT_SECONDS,
+            )
         if payload.get("ok") and destination.exists():
             return destination.read_bytes()
         LOGGER.warning("isolated preview worker failed for %s: %s", path, payload.get("error", "unknown error"))
