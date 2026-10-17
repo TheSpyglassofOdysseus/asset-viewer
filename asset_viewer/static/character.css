@@ -44,3 +44,56 @@ h1{font-size:clamp(22px,2.5vw,31px);margin:0}#characterSummary{margin:6px 0 0;co
 .no-art{border:1px dashed var(--line);padding:32px;border-radius:8px;color:var(--muted)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 @media(max-width:760px){.shell{display:block}.rail{height:auto;position:static;max-height:40vh;border-bottom:1px solid var(--line);border-right:0}.rail nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.main{padding:16px}.header{align-items:flex-start;flex-direction:column}.revision>summary{align-items:flex-start}.revision-label{font-size:11px}}
+
+/* 3D Studio · Obsidian & brass dark visual system. Presentation only. */
+:root{
+  color-scheme:dark;
+  --line:#333e4b;
+  --muted:#a4afbd;
+  --nav:#151c24;
+  --ink:#edf0f1;
+  --accent:#e4bd7f;
+}
+html,body{background:#10151b;color:var(--ink)}
+.shell{background:radial-gradient(ellipse at 50% 0%,#202a35 0%,#121920 34%,#10151b 75%)}
+.rail{background:linear-gradient(#19222c,#141b23);border-color:#323c47}
+.brand>a{background:linear-gradient(145deg,#5c4b35,#362d25);border:1px solid #90734c;color:#f5deb5}
+.brand strong{color:#efece5}
+.brand small{color:#a4adbb}
+.rail label{color:#c4a675}
+.rail input{background:#1d2832;border-color:#3e4b59;color:#edf0f1}
+.rail input::placeholder{color:#8591a1}
+.rail input:focus-visible{border-color:#d3ac72;outline:2px solid #92724455}
+.character-link{color:#c4cfda}
+.character-link .id{color:#c0a577}
+.character-link:hover{background:#273544;color:#f4eee2}
+.character-link.active{background:#39372f;color:#f6dfb4;box-shadow:inset 3px 0 #d9b57a}
+.character-link.active .id{color:#dfbd83}
+.rail .other-link{border-top:1px solid #35414d;color:#c3ad86}
+.main{background:transparent}
+.header{border-color:#35404c}
+.eyebrow{color:#cdad78}
+h1{color:#f1eee8}
+#characterSummary{color:#acb8c4}
+.header .other-link{color:#dab986}
+.revision{background:#1b242d;border-color:#3a4652;box-shadow:0 8px 22px #0002}
+.revision[open]{border-color:#665941}
+.revision>summary{background:linear-gradient(90deg,#26313d,#202a34);color:#e8edf0}
+.revision>summary:hover{background:#303e4a}
+.revision[open]>summary{background:linear-gradient(90deg,#312f2a,#26303a);border-bottom:1px solid #62543d}
+.revision>summary:before{color:#ddbb7f}
+.revision-title{color:#f4e4c6}
+.revision-label{color:#aebac7}
+.revision-body{background:#171f28}
+.revision-meta{color:#aeb9c7}
+.revision-meta .review-link{color:#e4bd7f;text-decoration:none;border:1px solid #8b754f;padding:7px 10px;border-radius:5px;background:#2c2d2b}
+.revision-meta .review-link:hover{background:#3c372e;color:#f4dba9}
+.asset{border-color:#36424f;background:#212c37;color:#edf0f1}
+.asset:hover{border-color:#bd9d6a;box-shadow:0 6px 19px #0006}
+.asset img{background:#11171d}
+.asset-caption strong{color:#eff2f1}
+.asset-caption small{color:#aab6c4}
+.no-art{border-color:#44515e;background:#1c2530;color:#b4bfcc}
+#message:not(:empty){color:#dcb876}
+:focus-visible{outline-color:#deb978}
+@media(max-width:760px){.rail{background:#151d25;border-color:#36414d}}
