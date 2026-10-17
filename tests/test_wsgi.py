@@ -78,6 +78,19 @@ class WsgiTests(unittest.TestCase):
                 close()
         return int(captured["status"].split()[0]), captured["headers"], payload
 
+    def test_production_wsgi_gallery_includes_character_roster(self):
+        canonical = Path(self.tmp.name) / "canonical_roster.json"
+        canonical.write_text(json.dumps({"characters": [
+            {"id": "CHR-001", "name": "Sir Aldric"},
+            {"id": "CHR-003", "name": "Prior Edrin"},
+        ]}))
+        (Path(os.environ["ASSET_VIEWER_HOME"]) / "character-roster.json").symlink_to(canonical)
+        status, _, payload = self.request("GET", "/api/gallery", query="collection=samples")
+        self.assertEqual(status, 200)
+        response = json.loads(payload)
+        self.assertEqual([c["id"] for c in response["roster"]], ["CHR-001", "CHR-003"])
+        self.assertEqual(len(response["images"]), 1)
+
     def test_health_uses_waitress_application_contract(self):
         status, _, body = self.request("GET", "/api/health")
         self.assertEqual(status, 200)

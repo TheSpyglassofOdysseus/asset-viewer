@@ -1,5 +1,9 @@
 let state = {
   collections: [],
+  roster: [],
+  rosterQuery: '',
+  rosterExpanded: new Set(),
+  otherCollectionsExpanded: false,
   images: [],
   families: [],
   filtered: [],
@@ -154,6 +158,7 @@ async function load(requested, force = false) {
   if (!response.ok) throw new Error('Gallery request failed');
   const data = await response.json();
   state.collections = data.collections;
+  state.roster = Array.isArray(data.roster) ? data.roster : [];
   state.images = data.images;
   state.families = data.families || [];
   state.active = data.active;
@@ -245,6 +250,37 @@ function renderWorkspaceState() {
   else $('#workspaceCount').textContent = `${state.filtered.length} shown`;
 }
 
+function revisionNumber(collection) {
+  const match = (collection.slug + ' ' + collection.label).match(/(?:^|[^a-z0-9])v0*(\d+)(?:[^0-9]|$)/i);
+  return match ? Number(match[1]) : -1;
+}
+
+function collectionLink(collection, active, compact = false) {
+  return `<button type="button" class="collection-link${compact ? ' revision-link' : ''}${collection.slug === active ? ' active' : ''}" data-collection="${esc(collection.slug)}"${collection.available === false ? ' disabled' : ''}><span class="collection-icon" aria-hidden="true"></span><span>${esc(collection.label)}</span>${collection.available === false ? '<small>Unavailable</small>' : ''}</button>`;
+}
+
+function filterCharacterNav() {
+  const query = state.rosterQuery.trim().toLowerCase();
+  const collectionBySlug = new Map(state.collections.map(item => [item.slug, item]));
+  $('#collectionNav').querySelectorAll('details[data-character-id]').forEach(details => {
+    const character = state.roster.find(item => item.id === details.dataset.characterId);
+    if (!character) return;
+    const collectionNames = (character.collections || []).map(slug => collectionBySlug.get(slug)?.label || '').join(' ');
+    const text = [character.id, character.name, character.faction, collectionNames].join(' ').toLowerCase();
+    details.hidden = !!query && !text.includes(query);
+    if (query && !details.hidden) details.open = true;
+    else if (!query) details.open = state.rosterExpanded.has(character.id) ||
+      (character.collections || []).includes(state.active);
+  });
+  const other = $('#otherCollections');
+  if (other) {
+    // Other collections remain accessible even when filtering characters.
+    const otherLabels = Array.from(other.querySelectorAll('[data-collection]')).map(el => el.textContent).join(' ').toLowerCase();
+    other.hidden = !!query && !('other collections'.includes(query) || otherLabels.includes(query));
+    if (query && !other.hidden) other.open = true;
+  }
+}
+
 function renderCollections(active) {
   const select = $('#collection');
   const nav = $('#collectionNav');
@@ -255,18 +291,64 @@ function renderCollections(active) {
     grouped.get(group).push(collection);
   }
   const parts = [];
-  const navParts = [];
+  const flatNav = [];
   for (const [group, rows] of grouped) {
     const options = rows.map(collection =>
       `<option value="${esc(collection.slug)}">${esc(collection.label)}${collection.available === false ? ' — unavailable' : ''}</option>`
     ).join('');
     parts.push(group ? `<optgroup label="${esc(group)}">${options}</optgroup>` : options);
-    if (group) navParts.push(`<span class="collection-group">${esc(group)}</span>`);
-    navParts.push(...rows.map(collection => `<button type="button" class="collection-link${collection.slug === active ? ' active' : ''}" data-collection="${esc(collection.slug)}"${collection.available === false ? ' disabled' : ''}><span class="collection-icon" aria-hidden="true"></span><span>${esc(collection.label)}</span>${collection.available === false ? '<small>Unavailable</small>' : ''}</button>`));
+    if (group) flatNav.push(`<span class="collection-group">${esc(group)}</span>`);
+    flatNav.push(...rows.map(collection => collectionLink(collection, active)));
   }
   select.innerHTML = parts.join('');
-  nav.innerHTML = navParts.join('');
   if (active && state.collections.some(collection => collection.slug === active)) select.value = active;
+
+  if (!state.roster.length) {
+    nav.innerHTML = flatNav.join('');
+  } else {
+    const index = new Map(state.collections.map(item => [item.slug, item]));
+    const assigned = new Set();
+    const characters = state.roster.map(character => {
+      const revisions = (character.collections || [])
+        .map(slug => index.get(slug)).filter(Boolean)
+        .sort((a, b) => revisionNumber(b) - revisionNumber(a) || a.label.localeCompare(b.label));
+      revisions.forEach(item => assigned.add(item.slug));
+      const expanded = state.rosterExpanded.has(character.id) || revisions.some(item => item.slug === active);
+      const summary = `${esc(character.id)} · ${esc(character.name)}`;
+      const sub = `${revisions.length} revision${revisions.length === 1 ? '' : 's'}`;
+      return `<details class="roster-character" data-character-id="${esc(character.id)}"${expanded ? ' open' : ''}><summary><span class="roster-name">${summary}</span><span class="roster-count">${sub}</span></summary><div class="roster-revisions">${revisions.length ? revisions.map(item => collectionLink(item, active, true)).join('') : '<span class="roster-empty">No artwork registered yet</span>'}</div></details>`;
+    });
+    const remaining = state.collections.filter(item => !assigned.has(item.slug));
+    // Mobile keeps its native selector, but nests revisions beneath character names.
+    const mobile = state.roster.map(character => {
+      const revisions = (character.collections || []).map(slug => index.get(slug)).filter(Boolean);
+      if (!revisions.length) return '';
+      return `<optgroup label="${esc(character.id + ' ' + character.name)}">${revisions.sort((a, b) => revisionNumber(b) - revisionNumber(a)).map(item => `<option value="${esc(item.slug)}">${esc(item.label)}</option>`).join('')}</optgroup>`;
+    }).join('') + (remaining.length ? `<optgroup label="Other collections">${remaining.map(item => `<option value="${esc(item.slug)}">${esc(item.label)}</option>`).join('')}</optgroup>` : '');
+    select.innerHTML = mobile;
+    if (active) select.value = active;
+    const otherOpen = state.otherCollectionsExpanded || remaining.some(item => item.slug === active);
+    nav.innerHTML = `<label class="roster-search-label" for="characterSearch">Character roster · ${state.roster.length}</label><input id="characterSearch" class="roster-search" type="search" placeholder="Find character or revision" aria-label="Find character or revision" value="${esc(state.rosterQuery)}"><div class="roster-characters">${characters.join('')}</div>` +
+      (remaining.length ? `<details id="otherCollections" class="roster-other"${otherOpen ? ' open' : ''}><summary>Other collections · ${remaining.length}</summary><div class="roster-revisions">${remaining.map(item => collectionLink(item, active, true)).join('')}</div></details>` : '');
+    nav.querySelectorAll('details[data-character-id]').forEach(details => {
+      // Save intentional clicks, not the programmatic expansion used for searching.
+      details.querySelector('summary').addEventListener('click', () => {
+        if (state.rosterQuery) return;
+        if (details.open) state.rosterExpanded.delete(details.dataset.characterId);
+        else state.rosterExpanded.add(details.dataset.characterId);
+      });
+    });
+    const other = $('#otherCollections');
+    if (other) other.querySelector('summary').addEventListener('click', () => {
+      if (!state.rosterQuery) state.otherCollectionsExpanded = !other.open;
+    });
+    const search = $('#characterSearch');
+    search.oninput = () => {
+      state.rosterQuery = search.value;
+      filterCharacterNav();
+    };
+    filterCharacterNav();
+  }
   nav.querySelectorAll('[data-collection]').forEach(button => {
     button.onclick = () => switchCollection(button.dataset.collection).catch(showError);
   });

@@ -25,6 +25,7 @@ from . import __version__
 from .preview_worker import inspect_images_worker, render_preview_worker, render_video_poster_worker
 from .activity import activity_feed
 from .handoff import approved_handoff
+from .character_roster import public_character_roster
 from .storage import (
     ASSET_EXTS,
     IMAGE_EXTS,
@@ -607,7 +608,7 @@ class AssetViewerHandler(BaseHTTPRequestHandler):
             images, scan = scan_collection(active, force=force_scan) if active else ([], {"truncated": False, "reason": None, "elapsed_ms": 0, "cached": True})
             review_state = collection_review_state(active) if active else None
             families = families_for_collection(active, include_missing=False) if active else []
-            return self._send_json(200, {"collections": public_rows, "active": active, "images": images, "families": families, "scan": scan, "review_state": review_state})
+            return self._send_json(200, {"collections": public_rows, "roster": public_character_roster(public_rows), "active": active, "images": images, "families": families, "scan": scan, "review_state": review_state})
         if path == "/report":
             query = urllib.parse.parse_qs(parsed.query)
             collection = (query.get("collection") or [None])[0]

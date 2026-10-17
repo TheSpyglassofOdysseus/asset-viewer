@@ -38,6 +38,7 @@ class HttpSecurityTests(unittest.TestCase):
         self.thread.join(timeout=2)
         os.environ.pop("ASSET_VIEWER_HOME", None)
         os.environ.pop("ASSET_VIEWER_CACHE", None)
+        os.environ.pop("ASSET_VIEWER_CHARACTER_ROSTER_PATH", None)
         self.tmp.cleanup()
 
     def request(self, method, path, *, host=None, origin=None, body=None, csrf=None, authorization=None, content_type="application/json"):
@@ -60,6 +61,28 @@ class HttpSecurityTests(unittest.TestCase):
 
     def same_origin(self):
         return f"http://127.0.0.1:{self.port}"
+
+    def test_gallery_optional_character_roster_is_read_only(self):
+        roster = Path(self.tmp.name) / "roster.json"
+        roster.write_text(json.dumps({"characters": [
+            {"id": "CHR-001", "name": "Sir Aldric", "faction": "Dawnward Covenant"},
+            {"id": "CHR-002", "name": "Marra Vell", "faction": "Dawnward Covenant"},
+        ]}))
+        os.environ["ASSET_VIEWER_CHARACTER_ROSTER_PATH"] = str(roster)
+        status, _, body = self.request("GET", "/api/gallery?collection=samples")
+        self.assertEqual(status, 200)
+        result = json.loads(body)
+        self.assertEqual(len(result["roster"]), 2)
+        self.assertEqual(result["roster"][0]["name"], "Sir Aldric")
+        self.assertEqual(result["roster"][1]["collections"], [])
+        self.assertNotIn(str(roster), body.decode("utf-8"))
+        self.assertEqual(len(result["images"]), 2)
+
+    def test_gallery_without_character_roster_keeps_old_behavior(self):
+        os.environ.pop("ASSET_VIEWER_CHARACTER_ROSTER_PATH", None)
+        status, _, body = self.request("GET", "/api/gallery?collection=samples")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["roster"], [])
 
     def test_encoded_traversal_is_rejected(self):
         outside = Path(self.tmp.name) / "outside.png"
