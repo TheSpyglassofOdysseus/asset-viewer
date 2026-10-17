@@ -90,6 +90,28 @@ class WsgiTests(unittest.TestCase):
         response = json.loads(payload)
         self.assertEqual([c["id"] for c in response["roster"]], ["CHR-001", "CHR-003"])
         self.assertEqual(len(response["images"]), 1)
+        status, _, payload = self.request("GET", "/api/characters/CHR-003")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(payload)["collection_id"], "CHR-003")
+        self.assertEqual(json.loads(payload)["revisions"], [])
+        status, _, _ = self.request("GET", "/api/characters/CHR-099")
+        self.assertEqual(status, 404)
+
+    def test_single_character_collection_page_is_usable_and_safe(self):
+        for endpoint, content_type in [
+            ("/characters/CHR-003", "text/html"),
+            ("/character.js", "application/javascript"),
+            ("/character.css", "text/css"),
+        ]:
+            status, headers, body = self.request("GET", endpoint)
+            self.assertEqual(status, 200, endpoint)
+            self.assertIn(content_type, headers.get("Content-Type", ""))
+            self.assertTrue(body)
+        status, _, _ = self.request("GET", "/characters/CHR-003/../../etc/passwd")
+        self.assertEqual(status, 404)
+        protected = AssetViewerWSGI({"127.0.0.1"}, auth_password="secret", csrf_token="csrf-test")
+        status, _, _ = self.request("GET", "/characters/CHR-003", app=protected)
+        self.assertEqual(status, 401)
 
     def test_health_uses_waitress_application_contract(self):
         status, _, body = self.request("GET", "/api/health")

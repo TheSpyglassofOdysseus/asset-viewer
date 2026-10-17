@@ -262,15 +262,12 @@ function collectionLink(collection, active, compact = false) {
 function filterCharacterNav() {
   const query = state.rosterQuery.trim().toLowerCase();
   const collectionBySlug = new Map(state.collections.map(item => [item.slug, item]));
-  $('#collectionNav').querySelectorAll('details[data-character-id]').forEach(details => {
-    const character = state.roster.find(item => item.id === details.dataset.characterId);
+  $('#collectionNav').querySelectorAll('[data-character-id]').forEach(link => {
+    const character = state.roster.find(item => item.id === link.dataset.characterId);
     if (!character) return;
     const collectionNames = (character.collections || []).map(slug => collectionBySlug.get(slug)?.label || '').join(' ');
     const text = [character.id, character.name, character.faction, collectionNames].join(' ').toLowerCase();
-    details.hidden = !!query && !text.includes(query);
-    if (query && !details.hidden) details.open = true;
-    else if (!query) details.open = state.rosterExpanded.has(character.id) ||
-      (character.collections || []).includes(state.active);
+    link.hidden = !!query && !text.includes(query);
   });
   const other = $('#otherCollections');
   if (other) {
@@ -309,35 +306,22 @@ function renderCollections(active) {
     const index = new Map(state.collections.map(item => [item.slug, item]));
     const assigned = new Set();
     const characters = state.roster.map(character => {
-      const revisions = (character.collections || [])
-        .map(slug => index.get(slug)).filter(Boolean)
-        .sort((a, b) => revisionNumber(b) - revisionNumber(a) || a.label.localeCompare(b.label));
-      revisions.forEach(item => assigned.add(item.slug));
-      const expanded = state.rosterExpanded.has(character.id) || revisions.some(item => item.slug === active);
-      const summary = `${esc(character.id)} · ${esc(character.name)}`;
-      const sub = `${revisions.length} revision${revisions.length === 1 ? '' : 's'}`;
-      return `<details class="roster-character" data-character-id="${esc(character.id)}"${expanded ? ' open' : ''}><summary><span class="roster-name">${summary}</span><span class="roster-count">${sub}</span></summary><div class="roster-revisions">${revisions.length ? revisions.map(item => collectionLink(item, active, true)).join('') : '<span class="roster-empty">No artwork registered yet</span>'}</div></details>`;
+      (character.collections || []).forEach(slug => assigned.add(slug));
+      const count = (character.collections || []).length;
+      const current = (character.collections || []).includes(active);
+      return `<a class="roster-character-link${current ? ' active' : ''}" data-character-id="${esc(character.id)}" href="/characters/${encodeURIComponent(character.id)}"><span class="roster-name">${esc(character.id)} · ${esc(character.name)}</span><span class="roster-count">${count} revision${count === 1 ? '' : 's'}</span></a>`;
     });
     const remaining = state.collections.filter(item => !assigned.has(item.slug));
-    // Mobile keeps its native selector, but nests revisions beneath character names.
-    const mobile = state.roster.map(character => {
-      const revisions = (character.collections || []).map(slug => index.get(slug)).filter(Boolean);
-      if (!revisions.length) return '';
-      return `<optgroup label="${esc(character.id + ' ' + character.name)}">${revisions.sort((a, b) => revisionNumber(b) - revisionNumber(a)).map(item => `<option value="${esc(item.slug)}">${esc(item.label)}</option>`).join('')}</optgroup>`;
-    }).join('') + (remaining.length ? `<optgroup label="Other collections">${remaining.map(item => `<option value="${esc(item.slug)}">${esc(item.label)}</option>`).join('')}</optgroup>` : '');
+    // One top-level option per character. Legacy source galleries remain addressable.
+    const mobile = '<optgroup label="Character collections">' + state.roster.map(character =>
+      `<option value="character:${esc(character.id)}">${esc(character.id + ' · ' + character.name)}</option>`
+    ).join('') + '</optgroup>' + (remaining.length ? `<optgroup label="Other collections">${remaining.map(item => `<option value="${esc(item.slug)}">${esc(item.label)}</option>`).join('')}</optgroup>` : '');
     select.innerHTML = mobile;
-    if (active) select.value = active;
+    const selected = state.roster.find(character => (character.collections || []).includes(active));
+    select.value = selected ? 'character:' + selected.id : active;
     const otherOpen = state.otherCollectionsExpanded || remaining.some(item => item.slug === active);
     nav.innerHTML = `<label class="roster-search-label" for="characterSearch">Character roster · ${state.roster.length}</label><input id="characterSearch" class="roster-search" type="search" placeholder="Find character or revision" aria-label="Find character or revision" value="${esc(state.rosterQuery)}"><div class="roster-characters">${characters.join('')}</div>` +
       (remaining.length ? `<details id="otherCollections" class="roster-other"${otherOpen ? ' open' : ''}><summary>Other collections · ${remaining.length}</summary><div class="roster-revisions">${remaining.map(item => collectionLink(item, active, true)).join('')}</div></details>` : '');
-    nav.querySelectorAll('details[data-character-id]').forEach(details => {
-      // Save intentional clicks, not the programmatic expansion used for searching.
-      details.querySelector('summary').addEventListener('click', () => {
-        if (state.rosterQuery) return;
-        if (details.open) state.rosterExpanded.delete(details.dataset.characterId);
-        else state.rosterExpanded.add(details.dataset.characterId);
-      });
-    });
     const other = $('#otherCollections');
     if (other) other.querySelector('summary').addEventListener('click', () => {
       if (!state.rosterQuery) state.otherCollectionsExpanded = !other.open;
@@ -1377,7 +1361,11 @@ function runPaletteCommand(index) {
   Promise.resolve(command.run()).catch(showError);
 }
 
-$('#collection').onchange = () => switchCollection($('#collection').value).catch(showError);
+$('#collection').onchange = () => {
+  const selected = $('#collection').value;
+  if (selected.startsWith('character:')) location.assign('/characters/' + encodeURIComponent(selected.slice(10)));
+  else switchCollection(selected).catch(showError);
+};
 $('#filter').onchange = () => { syncWorkspaceFromAssetControls(); applyFilter(); updateCollectionActions(); };
 $('#sort').onchange = () => { if (state.workspaceTab === 'activity') syncWorkspaceFromAssetControls(); clearActiveSavedView(); applyFilter(); };
 $('#search').oninput = () => { if (state.workspaceTab === 'activity') syncWorkspaceFromAssetControls(); clearActiveSavedView(); applyFilter(); updateCollectionActions(); };

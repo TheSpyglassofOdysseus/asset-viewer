@@ -159,3 +159,10 @@ button:focus-visible,select:focus-visible,input:focus-visible,.card:focus-visibl
 .roster-revisions .revision-link{grid-template-columns:9px minmax(0,1fr);min-height:34px;padding:6px;font-size:11px;overflow-wrap:anywhere}
 .roster-empty{display:block;font-size:11px;color:#98a2b3;padding:4px 2px 8px}
 .roster-other{margin-top:10px}
+
+/* A character is one primary collection; revisions live inside that collection page. */
+.roster-character-link{display:grid;gap:2px;padding:8px 7px;border-radius:6px;color:#344054;text-decoration:none;font-size:12px;border:1px solid transparent}
+.roster-character-link:hover,.roster-character-link:focus-visible{background:#edf3fc;border-color:#d8e5f7}
+.roster-character-link.active{background:#dceafb;color:#1f4f96;font-weight:700}
+.roster-character-link[hidden]{display:none}
+.roster-character-link .roster-count{grid-column:1;font-size:10px;font-weight:400}

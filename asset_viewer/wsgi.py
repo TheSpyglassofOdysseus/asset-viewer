@@ -7,6 +7,7 @@ import json
 import logging
 import mimetypes
 import os
+import re
 import secrets
 import urllib.parse
 from http import HTTPStatus
@@ -17,7 +18,7 @@ from waitress import serve as waitress_serve
 
 from . import __version__
 from .activity import activity_feed
-from .character_roster import public_character_roster
+from .character_roster import public_character_collection, public_character_roster
 from .handoff import approved_handoff
 from .app import (
     BASE_CSP,
@@ -253,6 +254,12 @@ class AssetViewerWSGI:
     ) -> Iterable[bytes]:
         if path in ("/", "/index.html") or path.startswith("/c/"):
             return self._static(environ, start_response, "index.html", "text/html; charset=utf-8")
+        if re.fullmatch(r"/characters/CHR-[0-9]{3}", path):
+            return self._static(environ, start_response, "character.html", "text/html; charset=utf-8")
+        if path == "/character.css":
+            return self._static(environ, start_response, "character.css", "text/css; charset=utf-8")
+        if path == "/character.js":
+            return self._static(environ, start_response, "character.js", "application/javascript; charset=utf-8")
         if path == "/app.css":
             return self._static(environ, start_response, "app.css", "text/css; charset=utf-8")
         if path == "/app.js":
@@ -262,6 +269,10 @@ class AssetViewerWSGI:
         if path == "/api/capabilities":
             payload = capability_document() | {"production_server": "waitress"}
             return _json_response(start_response, 200, payload)
+        char_match = re.fullmatch(r"/api/characters/(CHR-[0-9]{3})", path)
+        if char_match:
+            item = public_character_collection(collections(), char_match.group(1))
+            return _json_response(start_response, 200, item) if item else _json_response(start_response, 404, {"error": "character not found"})
         if path == "/api/gallery":
             rows = collections()
             active = (query.get("collection") or [rows[0]["slug"] if rows else ""])[0]

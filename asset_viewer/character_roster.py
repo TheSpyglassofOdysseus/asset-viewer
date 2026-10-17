@@ -109,3 +109,35 @@ def public_character_roster(rows: list[dict]) -> list[dict]:
     except (OSError, ValueError, UnicodeError, json.JSONDecodeError) as exc:
         LOGGER.warning("optional character roster navigation disabled: %s", exc)
         return []
+
+
+def public_character_collection(rows: list[dict], character_id: str) -> dict | None:
+    """One stable virtual collection per roster ID; revisions reference source galleries.
+
+    Old collection slugs remain internal source identifiers for non-destructive
+    compatibility, never separate canonical character collection IDs.
+    """
+    if not CHARACTER_ID.fullmatch(character_id):
+        return None
+    character = next((c for c in public_character_roster(rows) if c["id"] == character_id), None)
+    if character is None:
+        return None
+    by_slug = {str(row.get("slug")): row for row in rows}
+    def revision_number(row: dict) -> int:
+        match = re.search(r"(?:^|[^a-z0-9])v0*(\d+)(?:[^0-9]|$)",
+                          str(row.get("slug", "")) + " " + str(row.get("label", "")), re.I)
+        return int(match.group(1)) if match else -1
+
+    sources = [by_slug[slug] for slug in character["collections"] if slug in by_slug]
+    sources.sort(key=lambda row: (-revision_number(row), str(row.get("label", "")).lower()))
+    return {
+        "collection_id": character["id"],
+        "character_id": character["id"],
+        "name": character["name"],
+        "faction": character["faction"],
+        "revisions": [
+            {"source_slug": row["slug"], "label": row.get("label", row["slug"]),
+             "revision": revision_number(row), "available": row.get("available", True)}
+            for row in sources
+        ],
+    }

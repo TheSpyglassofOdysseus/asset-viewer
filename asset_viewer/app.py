@@ -8,6 +8,7 @@ import logging
 import mimetypes
 import multiprocessing
 import os
+import re
 import secrets
 import shutil
 import time
@@ -25,7 +26,7 @@ from . import __version__
 from .preview_worker import inspect_images_worker, render_preview_worker, render_video_poster_worker
 from .activity import activity_feed
 from .handoff import approved_handoff
-from .character_roster import public_character_roster
+from .character_roster import public_character_collection, public_character_roster
 from .storage import (
     ASSET_EXTS,
     IMAGE_EXTS,
@@ -589,6 +590,12 @@ class AssetViewerHandler(BaseHTTPRequestHandler):
             return
         if path in ("/", "/index.html") or path.startswith("/c/"):
             return self._static("index.html", "text/html; charset=utf-8")
+        if re.fullmatch(r"/characters/CHR-[0-9]{3}", path):
+            return self._static("character.html", "text/html; charset=utf-8")
+        if path == "/character.css":
+            return self._static("character.css", "text/css; charset=utf-8")
+        if path == "/character.js":
+            return self._static("character.js", "application/javascript; charset=utf-8")
         if path == "/app.css":
             return self._static("app.css", "text/css; charset=utf-8")
         if path == "/app.js":
@@ -597,6 +604,10 @@ class AssetViewerHandler(BaseHTTPRequestHandler):
             return self._send_json(200, {"csrf": getattr(self.server, "csrf_token", ""), "version": __version__})
         if path == "/api/capabilities":
             return self._send_json(200, capability_document())
+        char_match = re.fullmatch(r"/api/characters/(CHR-[0-9]{3})", path)
+        if char_match:
+            item = public_character_collection(collections(), char_match.group(1))
+            return self._send_json(200, item) if item else self._send_json(404, {"error": "character not found"})
         if path == "/api/gallery":
             rows = collections()
             query = urllib.parse.parse_qs(parsed.query)
