@@ -70,6 +70,7 @@ No import job. No duplicate asset library. No requirement to upload the batch to
 - **Human-readable Activity view** backed by the same durable event stream agents consume.
 - **Approved-set handoff manifests** with exact stable IDs, hashes, decisions, annotations, family/preferred state, and provenance; optional copying is explicit and never mutates originals.
 - **Grouped collection navigation** that organizes the viewer without moving project folders.
+- **Optional character roster navigation** with a searchable, collapsible character → revision hierarchy; give the service `ASSET_VIEWER_CHARACTER_ROSTER_PATH` pointing to your external canonical JSON roster. All existing review URLs remain valid. See [character roster navigation](docs/CHARACTER_ROSTER_NAVIGATION.md).
 - **Project-native `.asset-viewer.toml` registration** so repositories can declare review folders without bespoke setup scripts.
 - **Metadata adapters** for sidecar JSON and isolated PNG generation metadata import.
 - **Durable outbound webhooks** with signed delivery, replay control, and per-endpoint cursors for push automation.
