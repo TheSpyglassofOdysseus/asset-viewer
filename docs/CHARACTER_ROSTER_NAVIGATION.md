@@ -13,6 +13,12 @@ export ASSET_VIEWER_CHARACTER_ROSTER_PATH=/absolute/path/to/roster.json
 asset-viewer serve
 ```
 
+Alternatively, without changing a systemd unit, place a **symlink** named
+`character-roster.json` in the instance's existing `ASSET_VIEWER_HOME`
+directory, pointing to the canonical project roster. If the explicit environment
+variable is set, it takes precedence. A missing symlink and missing environment
+variable leave the original flat navigation enabled.
+
 The JSON may be a list of records or an object with a `characters` array.
 Each record should have an immutable ID (for example `CHR-003`), a display
 `name`, and optionally `faction`.

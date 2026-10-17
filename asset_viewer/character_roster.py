@@ -65,6 +65,14 @@ def public_character_roster(rows: list[dict]) -> list[dict]:
     """
     configured = os.environ.get("ASSET_VIEWER_CHARACTER_ROSTER_PATH", "")
     if not configured:
+        # Optional instance-local opt-in. It may be a symlink to a project-owned
+        # canonical roster, so the viewer never maintains a second copy.
+        home = os.environ.get("ASSET_VIEWER_HOME", "")
+        if home:
+            candidate = Path(home) / "character-roster.json"
+            if candidate.is_file():
+                configured = str(candidate)
+    if not configured:
         return []
     try:
         path = Path(configured)

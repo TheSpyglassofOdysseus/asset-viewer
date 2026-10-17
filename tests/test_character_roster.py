@@ -70,6 +70,18 @@ class CharacterRosterTests(unittest.TestCase):
         self.roster.write_text(json.dumps({"characters": [{"id": "X", "name": "<script>alert(1)</script>"}]}))
         self.assertEqual(public_character_roster([]), [])
 
+    def test_instance_local_roster_symlink_follows_canonical_source(self):
+        state = Path(self.temp.name) / "instance"
+        state.mkdir()
+        (state / "character-roster.json").symlink_to(self.roster)
+        with patch.dict(os.environ, {
+            "ASSET_VIEWER_HOME": str(state),
+            "ASSET_VIEWER_CHARACTER_ROSTER_PATH": "",
+        }):
+            actual = public_character_roster([])
+        self.assertEqual(len(actual), 100)
+        self.assertEqual(actual[2]["name"], "Prior Edrin")
+
     def test_duplicate_character_ids_ignored(self):
         self.characters.append({"id": "CHR-003", "name": "Duplicate Edrin"})
         self.roster.write_text(json.dumps({"characters": self.characters}))
