@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from asset_viewer.character_roster import public_character_roster
+from asset_viewer.character_roster import public_character_collection, public_character_roster
 
 
 class CharacterRosterTests(unittest.TestCase):
@@ -50,6 +50,20 @@ class CharacterRosterTests(unittest.TestCase):
         self.assertEqual(mapping["CHR-002"], ["chr-002-marra-v002"])
         self.assertEqual(mapping["CHR-001"], ["chr-001-aldric"])
         self.assertFalse(any("unrelated" in slug for slugs in mapping.values() for slug in slugs))
+
+    def test_one_canonical_character_collection_has_nested_revision_sources(self):
+        rows = [
+            {"slug": "chr-003-prior-edrin-v002", "label": "Prior Edrin v002"},
+            {"slug": "chr-003-prior-edrin-v008", "label": "Prior Edrin v008"},
+            {"slug": "unrelated-demo", "label": "Demo"},
+        ]
+        result = public_character_collection(rows, "CHR-003")
+        self.assertEqual(result["collection_id"], "CHR-003")
+        self.assertEqual([row["revision"] for row in result["revisions"]], [8, 2])
+        self.assertEqual([row["source_slug"] for row in result["revisions"]],
+                         ["chr-003-prior-edrin-v008", "chr-003-prior-edrin-v002"])
+        self.assertIsNone(public_character_collection(rows, "CHR-999"))
+        self.assertIsNone(public_character_collection(rows, "../secrets"))
 
     def test_legacy_names_may_match_but_other_projects_stay_unassigned(self):
         rows = [

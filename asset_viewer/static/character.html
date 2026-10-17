@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Character Collections — Asset Viewer</title>
+<link rel="stylesheet" href="/character.css">
+</head>
+<body>
+<div class="shell">
+  <aside class="rail">
+    <div class="brand"><a href="/">AV</a><div><strong>Character Collections</strong><small>AI-Native 3D Studio</small></div></div>
+    <label for="rosterSearch">100-character roster</label>
+    <input id="rosterSearch" type="search" placeholder="Find character…" autocomplete="off">
+    <nav id="roster" aria-label="Character collections"></nav>
+    <a class="other-link" href="/">Other Asset Viewer collections</a>
+  </aside>
+  <main class="main">
+    <header class="header">
+      <div><p class="eyebrow">Character collection</p><h1 id="characterTitle">Loading…</h1><p id="characterSummary">All revisions, one place.</p></div>
+      <a href="/" class="other-link">Asset Viewer home</a>
+    </header>
+    <div id="message" role="status"></div>
+    <section id="revisions" class="revisions" aria-label="Revisions for this character"></section>
+  </main>
+</div>
+<script src="/character.js"></script>
+</body></html>

@@ -27,11 +27,15 @@ For the AI-Native 3D Studio, configure this environment variable to point at
 the **canonical production roster**, not a copy maintained within Asset Viewer.
 Do not commit any host-specific private file paths to this repository.
 
-With a valid roster, the desktop navigation shows **one collapsible row per
-character** (including those with no images), an optional search box, and nested
-revisions ordered newest-first. It automatically expands the current character.
-Unmatched collections remain in the collapsed **Other collections** section.
-Mobile uses the existing native collection selector with character optgroups.
+With a valid roster, the sidebar shows **one primary character collection
+link per character** (including those with no images). The canonical URL is
+`/characters/CHR-003`, and that collection page contains the **nested,
+collapsible revision folders** and image thumbnails, newest first. Existing
+review actions are reached by opening each image in its original review page.
+This avoids showing hundreds of raw revision registrations at top level.
+Unmatched collections remain under a collapsed **Other collections** section.
+Mobile uses the existing native collection selector with one option per
+character, plus other non-character collections.
 
 Registered collections are matched first by canonical `CHR-###` identifiers
 in their slugs/labels, then by unique name identifiers for legacy collections.
@@ -45,9 +49,18 @@ flat/grouped Asset Viewer navigation is used without any new behavior.
 
 - Source of truth: external roster JSON for names; Asset Viewer collection
   registry for existing collection IDs and review state.
-- API: `GET /api/gallery` optionally includes `roster` with
-  `{id, name, faction, collections: [slug]}` records. It exposes no filesystem
-  paths or private character descriptions.
+- The first-class **canonical collection** is `CHR-###`, viewed at
+  `/characters/CHR-003`. Its read-only API
+  `GET /api/characters/CHR-003` returns
+  `{collection_id, character_id, name, faction, revisions: [...]}`.
+- `GET /api/gallery` includes the roster index for navigation. Source revision
+  collections remain registered **internally** to preserve existing review
+  records and legacy image deep links; they are not separate top-level
+  character collections in the UI.
+- This is a non-destructive **logical collection** architecture. It does not
+  physically relocate image files or migrate the raw legacy registry. Future
+  generated revisions become entries inside the same canonical character view.
+  Physical migration is a separate project and must preserve per-image reviews.
 - Each revision button uses the existing collection-slug navigation. Existing
   `/c/<slug>` links, gallery routes, review history and approvals still work.
 - A roster row with no published images says `No artwork registered yet`,
