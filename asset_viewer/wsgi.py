@@ -17,6 +17,7 @@ from waitress import serve as waitress_serve
 
 from . import __version__
 from .activity import activity_feed
+from .character_roster import public_character_roster
 from .handoff import approved_handoff
 from .app import (
     BASE_CSP,
@@ -271,7 +272,7 @@ class AssetViewerWSGI:
             images, scan = scan_collection(active, force=force_scan) if active else ([], {"truncated": False, "reason": None, "elapsed_ms": 0, "cached": True})
             review_state = collection_review_state(active) if active else None
             families = families_for_collection(active, include_missing=False) if active else []
-            return _json_response(start_response, 200, {"collections": public_rows, "active": active, "images": images, "families": families, "scan": scan, "review_state": review_state})
+            return _json_response(start_response, 200, {"collections": public_rows, "roster": public_character_roster(public_rows), "active": active, "images": images, "families": families, "scan": scan, "review_state": review_state})
         if path == "/report":
             collection = (query.get("collection") or [None])[0]
             status = (query.get("status") or [None])[0]
