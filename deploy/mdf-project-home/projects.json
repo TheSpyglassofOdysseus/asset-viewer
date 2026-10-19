@@ -1,0 +1,145 @@
+{
+  "schema_version": 1,
+  "updated": "2026-10-19",
+  "note": "Curated, pinned review paths, never automated claims of approval or publication. Old links must remain stable.",
+  "projects": [
+    {
+      "id": "characters",
+      "name": "3D Character Studio",
+      "category": "Character production",
+      "description": "One roster for all 100 characters, source-art signoffs, current working models and complete revision histories.",
+      "pin": {
+        "name": "Sir Aldric animated studio",
+        "detail": "QS9 working preview · 49 clips (47 controls) · not release-approved",
+        "url": "/asset-viewer/characters/aldric-studio/",
+        "verified": "2026-10-19"
+      },
+      "links": [
+        {
+          "label": "Open 100-character roster",
+          "url": "/asset-viewer/characters/"
+        },
+        {
+          "label": "Sir Aldric revisions",
+          "url": "/asset-viewer/characters/CHR-001/"
+        },
+        {
+          "label": "Marra Vell revisions",
+          "url": "/asset-viewer/characters/CHR-002/"
+        }
+      ],
+      "status": "Active production · private"
+    },
+    {
+      "id": "gloam",
+      "name": "GLOAM",
+      "category": "Creature and game prototypes",
+      "description": "Keep playable studies separate from gait/IK experiments, diagnostics and rollback versions.",
+      "pin": {
+        "name": "Motion-art v004",
+        "detail": "Review candidate · not designated a final release",
+        "url": "/asset-viewer/characters/gloam-original-motion-art-v004/",
+        "verified": "2026-10-18"
+      },
+      "links": [
+        {
+          "label": "Toe-rig v010 experiment",
+          "url": "/asset-viewer/characters/gloam-widow-toe-rig-v010/"
+        },
+        {
+          "label": "Spider Feeding Grounds",
+          "url": "/asset-viewer/characters/spider-feeding-grounds-v001/"
+        }
+      ],
+      "status": "Experiment · owner review"
+    },
+    {
+      "id": "kitchen",
+      "name": "Kitchen Studio",
+      "category": "Equipment and 3D design",
+      "description": "Review Atosa equipment models and visual QA apart from story characters and creature experiments.",
+      "pin": {
+        "name": "Kitchen Studio model gallery",
+        "detail": "Equipment preview · visual QA pending",
+        "url": "/asset-viewer/characters/kitchen-studio/",
+        "verified": "2026-10-19"
+      },
+      "links": [
+        {
+          "label": "Freezer model lineup",
+          "url": "/asset-viewer/characters/ks-freezer-lineup-v4/"
+        },
+        {
+          "label": "SRE storefront",
+          "url": "/onlyfridges/"
+        }
+      ],
+      "status": "Private development"
+    },
+    {
+      "id": "storefront",
+      "name": "OnlyFridges / SRE",
+      "category": "Storefront and sales design",
+      "description": "Storefront, product presentation and self-service quote workflow; keep sales QA separate from 3D character art.",
+      "pin": {
+        "name": "OnlyFridges private storefront",
+        "detail": "Development checkout and quote flow · simulated only",
+        "url": "/onlyfridges/",
+        "verified": "2026-10-19"
+      },
+      "links": [
+        {
+          "label": "Atosa visual review",
+          "url": "/asset-viewer/c/onlyfridges-version-a-atosa-leaders"
+        },
+        {
+          "label": "SRE product visuals",
+          "url": "/asset-viewer/c/fdi-visual-audit-2026-09-14"
+        }
+      ],
+      "status": "Private development · no live payments"
+    },
+    {
+      "id": "media",
+      "name": "Media & Design",
+      "category": "Branding, video, and visual reviews",
+      "description": "Brand experiments and design assets, separate from character production and storefront products.",
+      "pin": {
+        "name": "Whetstone brand kit",
+        "detail": "Registered art collection · no global signoff implied",
+        "url": "/asset-viewer/c/whetstone-brand-kit",
+        "verified": "2026-10-19"
+      },
+      "links": [
+        {
+          "label": "Bridger brand",
+          "url": "/asset-viewer/c/bridger-brand"
+        }
+      ],
+      "status": "Source collections"
+    },
+    {
+      "id": "research",
+      "name": "Other Research",
+      "category": "Historical and cross-project assets",
+      "description": "Find smaller experiments through the complete source collection index below; nothing has been discarded.",
+      "pin": {
+        "name": "Browse all original collections",
+        "detail": "110 collections at time of audit · dynamically loaded",
+        "url": "#archive",
+        "verified": "2026-10-19"
+      },
+      "links": [
+        {
+          "label": "Recent review queue",
+          "url": "#reviews"
+        },
+        {
+          "label": "Project GitHub record",
+          "url": "https://github.com/TheSpyglassofOdysseus/asset-viewer/issues/47"
+        }
+      ],
+      "status": "Read-only index"
+    }
+  ]
+}
