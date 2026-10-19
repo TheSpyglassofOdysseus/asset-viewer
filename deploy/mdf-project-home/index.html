@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow,noarchive">
+<meta name="color-scheme" content="dark">
+<title>Asset Viewer — Projects</title>
+<link rel="stylesheet" href="/asset-viewer/characters/projects/project-home.css">
+</head>
+<body>
+<a class="skip" href="#projects">Skip to projects</a>
+<header class="top">
+  <div class="top-inner">
+    <a class="brand" href="/asset-viewer/"><span class="brand-mark">AV</span><span><strong>Asset Viewer</strong><small>Project overview</small></span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a href="/asset-viewer/characters/">Character roster</a>
+      <a href="#reviews">Needs review</a>
+      <a href="#archive">All collections</a>
+    </nav>
+  </div>
+</header>
+<main class="container">
+  <section class="hero">
+    <div class="eyebrow">YOUR WORKSPACE</div>
+    <h1>Projects, not a pile of versions.</h1>
+    <p>Start with the current review candidate. Older experiments and individual source folders are still here, but no longer compete for attention.</p>
+    <div class="hero-controls">
+      <label class="search-wrap"><span aria-hidden="true">⌕</span><input id="search" type="search" autocomplete="off" placeholder="Find a project, character or collection…" aria-label="Find a project or collection"></label>
+      <a class="quiet-link" href="https://github.com/TheSpyglassofOdysseus/asset-viewer/issues/47" target="_blank" rel="noopener noreferrer">Organization record ↗</a>
+    </div>
+  </section>
+  <section id="projects" class="section">
+    <div class="section-head"><div><h2>Project workspaces</h2><p>Explicitly pinned review destinations; these are not release approvals.</p></div><span id="projectCount" class="meta"></span></div>
+    <div class="cards" id="projectCards" aria-live="polite">
+      <p class="loading">Loading project directory…</p>
+    </div>
+  </section>
+  <section id="reviews" class="section">
+    <div class="section-head"><div><h2>Needs review</h2><p>Live counts from existing Asset Viewer decisions. No status is changed here.</p></div><span id="reviewCount" class="meta"></span></div>
+    <div id="reviewList" class="review-list" aria-live="polite"><p class="loading">Checking pending reviews…</p></div>
+  </section>
+  <section id="archive" class="section archive">
+    <div class="section-head"><div><h2>All source collections</h2><p>Every original registered collection remains accessible, including experiments and older versions.</p></div><span id="collectionCount" class="meta"></span></div>
+    <details id="allCollections"><summary>Browse the full collection index <span id="archiveSummary"></span></summary><div id="collectionList" class="collection-list" aria-live="polite">Loading…</div></details>
+  </section>
+  <footer><span>Private review workspace · Original files, approvals and review history are preserved.</span><a href="/asset-viewer/characters/">100-character roster ↗</a></footer>
+</main>
+<script src="/asset-viewer/characters/projects/project-home.js" defer></script>
+</body>
+</html>
