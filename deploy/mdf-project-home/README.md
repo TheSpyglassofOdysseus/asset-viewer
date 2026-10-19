@@ -14,7 +14,7 @@ This is a **metadata and navigation layer** over the existing Asset Viewer 0.10 
 ## Implementation, validation, deployment
 - Source: `deploy/mdf-project-home/{index.html,project-home.css,project-home.js,projects.json}`.
 - Smoke fixture: `browser-smoke.cjs` uses the existing Oracle ARM local Flask/Gallery backend plus a loopback-only proxy that reproduces critical nginx URL rewriting. It does **not** bypass real nginx Basic Auth.
-- Before deployment, run `node --check project-home.js`, `python3 -m json.tool projects.json`, and `node browser-smoke.cjs`.
+- Before deployment, run `node --check project-home.js`, `python3 -m json.tool projects.json`, generate `gallery-patched-preview.js` using `python3 patch_gallery.py --source /home/ubuntu/mdf-asset-viewer-private/asset-viewer-app.js --output gallery-patched-preview.js`, then `node browser-smoke.cjs`. After deployment the fixture falls back to the deployed JS when no preview copy is present.
 - On the Oracle ARM, run `python3 deploy.py --apply` as ubuntu. It **refuses overwrites** and checks patch anchors before writing the private app override. The old JS is backed up under `services/asset-viewer-live/backups/project-home-<UTC timestamp>/asset-viewer-app.js`.
 - Rollback: copy that backed-up JS over `/home/ubuntu/mdf-asset-viewer-private/asset-viewer-app.js` (preserve 0644) to restore the old root gallery behavior. The new static project directory can remain harmlessly; no existing path needs deletion.
 - After deployment, verify original gallery direct links, project home, mobile layout, and unauthenticated HTTP 401s for new paths and old review engine. Do not claim authenticated browser QA without credentials.
